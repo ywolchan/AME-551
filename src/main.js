@@ -3,7 +3,6 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { ThreeMFLoader } from "three/addons/loaders/3MFLoader.js";
-import { XRButton } from "three/addons/webxr/XRButton.js";
 import { XRHandModelFactory } from "three/addons/webxr/XRHandModelFactory.js";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import "./style.css";
@@ -15,6 +14,8 @@ const canvasHelp = document.querySelector("#canvas-help");
 const meshInfo = document.querySelector("#mesh-info");
 const radiusInput = document.querySelector("#brush-size");
 const strengthInput = document.querySelector("#brush-strength");
+const arInstructions = document.querySelector("#ar-instructions");
+const arPlaceButton = document.querySelector("#ar-place-button");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#1a1b21");
@@ -23,7 +24,7 @@ scene.fog = new THREE.Fog("#1a1b21", 6, 12);
 const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
 camera.position.set(0, 1.25, 4.7);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -31,6 +32,8 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
 renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType("local-floor");
+renderer.setClearColor(0x000000, 0);
 viewport.prepend(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -94,6 +97,16 @@ brushIndicator.visible = false;
 brushIndicator.renderOrder = 2;
 scene.add(brushIndicator);
 
+const placementReticle = new THREE.Mesh(
+	new THREE.RingGeometry(0.13, 0.16, 40),
+	new THREE.MeshBasicMaterial({ color: "#f4aa88", side: THREE.DoubleSide })
+);
+placementReticle.geometry.rotateX(-Math.PI / 2);
+placementReticle.matrixAutoUpdate = false;
+placementReticle.visible = false;
+placementReticle.renderOrder = 3;
+scene.add(placementReticle);
+
 const sculptRoot = new THREE.Group();
 scene.add(sculptRoot);
 
@@ -104,6 +117,13 @@ let brushRadius = Number(radiusInput.value);
 let brushStrength = Number(strengthInput.value);
 let isPointerSculpting = false;
 let lastSculptTime = 0;
+let hitTestSource = null;
+let hitTestReferenceSpace = null;
+let arSession = null;
+let arSurfaceFound = false;
+let clayPlacedInAR = false;
+let savedBackground = scene.background;
+let savedFog = scene.fog;
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
@@ -396,6 +416,52 @@ document.querySelector("#model-file").addEventListener("change", async (event) =
 	}
 });
 
+function updateARPlacementAvailability(found) {
+	arSurfaceFound = found;
+	arPlaceButton.disabled = !found;
+	if (!clayPlacedInAR) {
+		arInstructions.textContent = found
+			? "Surface found. Tap Place clay or tap the screen."
+			: "Move your phone slowly to find a surface.";
+	}
+}
+
+function placeClayAtReticle() {
+	if (!arSurfaceFound || !placementReticle.visible) return;
+	placementReticle.matrix.decompose(worldHit, worldCenter, worldScale);
+	sculptRoot.quaternion.copy(worldCenter);
+	sculptRoot.scale.setScalar(0.28);
+	worldNormal.set(0, 1, 0).applyQuaternion(worldCenter).normalize();
+	sculptRoot.position.copy(worldHit).addScaledVector(worldNormal, 0.82 * 0.28);
+	sculptRoot.visible = true;
+	clayPlacedInAR = true;
+	arInstructions.textContent = "Clay placed. Tap the clay to sculpt, or pinch with your fingers.";
+	arPlaceButton.textContent = "Clay placed";
+	arPlaceButton.disabled = true;
+	setStatus("Clay placed in AR");
+}
+
+const xrController = renderer.xr.getController(0);
+scene.add(xrController);
+xrController.addEventListener("select", () => {
+	if (!clayPlacedInAR) {
+		placeClayAtReticle();
+		return;
+	}
+
+	raycaster.setFromXRController(xrController);
+	hitMeshes.length = 0;
+	for (const mesh of sculptMeshes) hitMeshes.push(mesh);
+	const [hit] = raycaster.intersectObjects(hitMeshes, false);
+	if (!hit) return;
+	worldHit.copy(hit.point);
+	worldNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld).normalize();
+	sculptAt(worldHit, worldNormal);
+	setStatus(activeMode === "raise" ? "Raising clay" : "Lowering clay");
+});
+
+arPlaceButton.addEventListener("click", placeClayAtReticle);
+
 window.addEventListener("keydown", (event) => {
 	if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
 		event.preventDefault();
@@ -424,7 +490,7 @@ const hands = [0, 1].map((index) => {
 });
 
 function updateHands(time) {
-	if (!renderer.xr.isPresenting || activeMode === null) return;
+	if (!renderer.xr.isPresenting || !clayPlacedInAR || activeMode === null) return;
 	let sculpted = false;
 	for (const hand of hands) {
 		const indexTip = hand.joints?.["index-finger-tip"];
@@ -457,18 +523,72 @@ function updateHands(time) {
 	if (sculpted) setStatus("Sculpting with hands");
 }
 
-const xrButton = XRButton.createButton(renderer, {
-	optionalFeatures: ["hand-tracking", "local-floor", "bounded-floor"],
+const xrButton = document.createElement("button");
+xrButton.type = "button";
+xrButton.textContent = "Place in AR";
+xrButton.addEventListener("click", async () => {
+	if (arSession) {
+		await arSession.end();
+		return;
+	}
+	clearError();
+	try {
+		if (!navigator.xr || !(await navigator.xr.isSessionSupported("immersive-ar"))) {
+			throw new Error("Immersive AR is not available in this browser. Try Chrome on an ARCore-supported device.");
+		}
+		const session = await navigator.xr.requestSession("immersive-ar", {
+			requiredFeatures: ["hit-test"],
+			optionalFeatures: ["local-floor", "dom-overlay", "hand-tracking"],
+			domOverlay: { root: document.body },
+		});
+		arSession = session;
+		await renderer.xr.setSession(session);
+	} catch (error) {
+		console.error("Could not start an AR session:", error);
+		showError(error instanceof Error ? error.message : "Could not start an AR session.");
+		setStatus("AR could not start");
+	}
 });
-xrButton.textContent = "Enter VR";
 document.querySelector("#xr-button-container").append(xrButton);
-renderer.xr.addEventListener("sessionstart", () => {
+renderer.xr.addEventListener("sessionstart", async () => {
 	controls.enabled = false;
-	setStatus("XR session active · pinch to sculpt");
+	document.body.classList.add("xr-ar");
+	scene.background = null;
+	scene.fog = null;
+	ground.visible = false;
+	groundGrid.visible = false;
+	sculptRoot.visible = false;
+	clayPlacedInAR = false;
+	placementReticle.visible = false;
+	arPlaceButton.textContent = "Place clay";
+	updateARPlacementAvailability(false);
+	setStatus("Scanning for a surface");
 	canvasHelp.classList.add("is-hidden");
+	try {
+		hitTestReferenceSpace = await arSession.requestReferenceSpace("viewer");
+		hitTestSource = await arSession.requestHitTestSource({ space: hitTestReferenceSpace });
+	} catch (error) {
+		console.error("Could not start AR surface detection:", error);
+		showError(error instanceof Error ? error.message : "Could not start surface detection.");
+		setStatus("Surface detection unavailable");
+	}
 });
 renderer.xr.addEventListener("sessionend", () => {
+	hitTestSource?.cancel();
+	hitTestSource = null;
+	hitTestReferenceSpace = null;
+	arSession = null;
 	controls.enabled = true;
+	document.body.classList.remove("xr-ar");
+	scene.background = savedBackground;
+	scene.fog = savedFog;
+	ground.visible = true;
+	groundGrid.visible = true;
+	sculptRoot.visible = true;
+	sculptRoot.position.set(0, 0, 0);
+	sculptRoot.quaternion.identity();
+	sculptRoot.scale.setScalar(1);
+	placementReticle.visible = false;
 	brushIndicator.visible = false;
 	setStatus("Ready to sculpt");
 });
@@ -489,6 +609,21 @@ createDefaultClay();
 
 renderer.setAnimationLoop((time) => {
 	if (!renderer.xr.isPresenting) controls.update();
+	if (renderer.xr.isPresenting && hitTestSource) {
+		const frame = renderer.xr.getFrame();
+		const referenceSpace = renderer.xr.getReferenceSpace();
+		const [hit] = frame?.getHitTestResults(hitTestSource) ?? [];
+		const pose = hit?.getPose(referenceSpace);
+		if (pose) {
+			placementReticle.matrix.fromArray(pose.transform.matrix);
+			placementReticle.matrixWorldNeedsUpdate = true;
+			placementReticle.visible = !clayPlacedInAR;
+			updateARPlacementAvailability(!clayPlacedInAR);
+		} else if (!clayPlacedInAR && arSurfaceFound) {
+			placementReticle.visible = false;
+			updateARPlacementAvailability(false);
+		}
+	}
 	updateHands(time);
 	renderer.render(scene, camera);
 });

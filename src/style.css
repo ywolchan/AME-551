@@ -432,6 +432,91 @@ kbd {
 	background: #362a25 !important;
 }
 
+.ar-overlay {
+	display: none;
+}
+
+body.xr-ar .sidebar,
+body.xr-ar .topbar,
+body.xr-ar .bottom-bar {
+	display: none;
+}
+
+body.xr-ar .studio {
+	position: fixed;
+	inset: 0;
+	display: block;
+	min-height: 100dvh;
+}
+
+body.xr-ar .viewport {
+	position: fixed;
+	inset: 0;
+	z-index: 5;
+	width: 100%;
+	height: 100dvh;
+	background: transparent;
+}
+
+body.xr-ar .viewport::before,
+body.xr-ar .viewport-glow,
+body.xr-ar .viewport-caption,
+body.xr-ar .canvas-help,
+body.xr-ar .viewport-footer {
+	display: none;
+}
+
+body.xr-ar .viewport canvas {
+	z-index: 0;
+	background: transparent;
+}
+
+body.xr-ar .ar-overlay {
+	position: fixed;
+	z-index: 10;
+	right: 18px;
+	bottom: max(24px, env(safe-area-inset-bottom));
+	left: 18px;
+	display: flex;
+	align-items: center;
+	flex-direction: column;
+	gap: 12px;
+	pointer-events: none;
+}
+
+.ar-instructions {
+	max-width: 380px;
+	padding: 11px 16px;
+	border: 1px solid #ffffff30;
+	border-radius: 999px;
+	background: #171920d9;
+	color: #f3f1ef;
+	font-size: 13px;
+	text-align: center;
+	text-shadow: 0 1px 5px #0008;
+}
+
+.ar-place-button {
+	min-height: 48px;
+	padding: 0 24px;
+	border: 1px solid #f5b397;
+	border-radius: 999px;
+	background: #e78d66;
+	box-shadow: 0 6px 24px #0005;
+	color: #241a18;
+	font-size: 15px;
+	font-weight: 700;
+	pointer-events: auto;
+	touch-action: manipulation;
+}
+
+.ar-place-button:disabled {
+	border-color: #ffffff2b;
+	background: #55545c;
+	color: #c6c4ca;
+	opacity: 0.8;
+}
+
 .viewport {
 	position: relative;
 	min-height: 0;
