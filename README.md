@@ -20,6 +20,6 @@ The `main` branch deploys to [GitHub Pages](https://ywolchan.github.io/AME-551/)
 - Drag on the clay to sculpt; orbit the view by dragging outside the model or holding Alt/Option.
 - Choose Raise or Lower, then adjust brush radius and strength in the sidebar.
 - Use Reset shape to restore the current model, or import an `.stl`, `.obj`, or `.3mf` file.
-- On a supported mobile browser, choose Place in AR, move the phone until the surface reticle appears, then tap Place clay. Tap the model to sculpt or pinch with hand tracking when available.
+- On a supported mobile browser, choose Place in AR, move the phone until the surface reticle appears, then tap Place clay. When WebXR hand tracking is available, fingertip gloves follow your hands; touch the clay with a fingertip, pinch, then pull to stretch it. Release the pinch to let go.
 
 Run `npm run build` to create the production bundle.

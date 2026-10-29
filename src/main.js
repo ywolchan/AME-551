@@ -3,7 +3,6 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { ThreeMFLoader } from "three/addons/loaders/3MFLoader.js";
-import { XRHandModelFactory } from "three/addons/webxr/XRHandModelFactory.js";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import "./style.css";
 
@@ -132,10 +131,13 @@ const worldCenter = new THREE.Vector3();
 const worldHit = new THREE.Vector3();
 const reticleQuaternion = new THREE.Quaternion();
 const localHit = new THREE.Vector3();
+const localDelta = new THREE.Vector3();
 const localDirection = new THREE.Vector3();
 const localVertex = new THREE.Vector3();
 const inverseWorld = new THREE.Matrix4();
+const inverseLinear = new THREE.Matrix3();
 const worldScale = new THREE.Vector3();
+const pullDelta = new THREE.Vector3();
 const hitMeshes = [];
 
 function setStatus(message) {
@@ -248,6 +250,37 @@ function sculptAt(worldPosition, direction, mode = activeMode) {
 			mesh.geometry.computeVertexNormals();
 			mesh.geometry.computeBoundingSphere();
 		}
+	}
+}
+
+function pullSurface(mesh, localAnchor, worldDisplacement) {
+	mesh.updateWorldMatrix(true, false);
+	inverseWorld.copy(mesh.matrixWorld).invert();
+	inverseLinear.setFromMatrix4(inverseWorld);
+	localDelta.copy(worldDisplacement).applyMatrix3(inverseLinear);
+	mesh.getWorldScale(worldScale);
+	const averageScale = (Math.abs(worldScale.x) + Math.abs(worldScale.y) + Math.abs(worldScale.z)) / 3;
+	const radius = brushRadius / Math.max(averageScale, 0.0001);
+	const radiusSquared = radius * radius;
+	const position = mesh.geometry.attributes.position;
+	let changed = false;
+
+	for (let index = 0; index < position.count; index += 1) {
+		localVertex.fromBufferAttribute(position, index);
+		const distanceSquared = localVertex.distanceToSquared(localAnchor);
+		if (distanceSquared >= radiusSquared) continue;
+
+		const distance = Math.sqrt(distanceSquared);
+		const weight = Math.pow(1 - distance / radius, 2);
+		localVertex.addScaledVector(localDelta, weight);
+		position.setXYZ(index, localVertex.x, localVertex.y, localVertex.z);
+		changed = true;
+	}
+
+	if (changed) {
+		position.needsUpdate = true;
+		mesh.geometry.computeVertexNormals();
+		mesh.geometry.computeBoundingSphere();
 	}
 }
 
@@ -436,7 +469,7 @@ function placeClayAtReticle() {
 	sculptRoot.position.copy(worldHit).addScaledVector(worldNormal, 0.82 * 0.28);
 	sculptRoot.visible = true;
 	clayPlacedInAR = true;
-	arInstructions.textContent = "Clay placed. Tap the clay to sculpt, or pinch with your fingers.";
+	arInstructions.textContent = "Tap the clay to sculpt, or touch it with a fingertip, pinch, then pull to stretch.";
 	arPlaceButton.textContent = "Clay placed";
 	arPlaceButton.disabled = true;
 	setStatus("Clay placed in AR");
@@ -478,50 +511,223 @@ window.addEventListener("keydown", (event) => {
 
 function worldJointPosition(joint, destination) {
 	if (!joint || !joint.visible) return false;
-	destination.setFromMatrixPosition(joint.matrixWorld);
+	joint.getWorldPosition(destination);
 	return true;
 }
 
-const handModelFactory = new XRHandModelFactory();
+const fingerChains = [
+	["wrist", "thumb-metacarpal", "thumb-phalanx-proximal", "thumb-phalanx-distal", "thumb-tip"],
+	["wrist", "index-finger-metacarpal", "index-finger-phalanx-proximal", "index-finger-phalanx-intermediate", "index-finger-phalanx-distal", "index-finger-tip"],
+	["wrist", "middle-finger-metacarpal", "middle-finger-phalanx-proximal", "middle-finger-phalanx-intermediate", "middle-finger-phalanx-distal", "middle-finger-tip"],
+	["wrist", "ring-finger-metacarpal", "ring-finger-phalanx-proximal", "ring-finger-phalanx-intermediate", "ring-finger-phalanx-distal", "ring-finger-tip"],
+	["wrist", "pinky-finger-metacarpal", "pinky-finger-phalanx-proximal", "pinky-finger-phalanx-intermediate", "pinky-finger-phalanx-distal", "pinky-finger-tip"],
+];
+const fingerTips = [
+	["thumb-tip", "thumb-phalanx-distal"],
+	["index-finger-tip", "index-finger-phalanx-distal"],
+	["middle-finger-tip", "middle-finger-phalanx-distal"],
+	["ring-finger-tip", "ring-finger-phalanx-distal"],
+	["pinky-finger-tip", "pinky-finger-phalanx-distal"],
+];
+const allJointNames = [...new Set(fingerChains.flat())];
+const gloveMaterial = new THREE.MeshStandardMaterial({
+	color: "#e7c7ae",
+	roughness: 0.48,
+	metalness: 0.02,
+});
+const gloveJointGeometry = new THREE.SphereGeometry(1, 12, 10);
+const gloveLinkGeometry = new THREE.CylinderGeometry(0.82, 1, 1, 10);
+const glovePalmGeometry = new THREE.SphereGeometry(1, 20, 14);
+const gloveUp = new THREE.Vector3(0, 1, 0);
+
+function createGlove(hand) {
+	const group = new THREE.Group();
+	const joints = new Map();
+	const links = [];
+	const localJoints = new Map();
+	const palm = new THREE.Mesh(glovePalmGeometry, gloveMaterial);
+	palm.scale.set(0.045, 0.018, 0.06);
+	group.add(palm);
+
+	for (const name of allJointNames) {
+		const joint = new THREE.Mesh(gloveJointGeometry, gloveMaterial);
+		joint.scale.setScalar(name === "wrist" ? 0.021 : name.endsWith("-tip") ? 0.009 : 0.013);
+		joint.visible = false;
+		group.add(joint);
+		joints.set(name, joint);
+	}
+
+	for (const chain of fingerChains) {
+		for (let index = 0; index < chain.length - 1; index += 1) {
+			const link = new THREE.Mesh(gloveLinkGeometry, gloveMaterial);
+			link.visible = false;
+			group.add(link);
+			links.push({ mesh: link, start: chain[index], end: chain[index + 1] });
+		}
+	}
+
+	hand.add(group);
+	return { hand, group, joints, links, localJoints, palm, pull: null };
+}
+
+function updateGlove(glove) {
+	glove.hand.updateWorldMatrix(true, true);
+	glove.group.updateWorldMatrix(true, false);
+	glove.localJoints.clear();
+
+	for (const name of allJointNames) {
+		const joint = glove.hand.joints?.[name];
+		const jointMesh = glove.joints.get(name);
+		if (!worldJointPosition(joint, worldHit)) {
+			jointMesh.visible = false;
+			continue;
+		}
+
+		const localPosition = glove.group.worldToLocal(worldHit.clone());
+		glove.localJoints.set(name, localPosition);
+		jointMesh.position.copy(localPosition);
+		jointMesh.visible = true;
+	}
+
+	for (const { mesh, start, end } of glove.links) {
+		const startPosition = glove.localJoints.get(start);
+		const endPosition = glove.localJoints.get(end);
+		if (!startPosition || !endPosition) {
+			mesh.visible = false;
+			continue;
+		}
+
+		const direction = endPosition.clone().sub(startPosition);
+		const length = direction.length();
+		if (length < 0.001) {
+			mesh.visible = false;
+			continue;
+		}
+		mesh.position.copy(startPosition).add(endPosition).multiplyScalar(0.5);
+		mesh.scale.set(0.009, length, 0.009);
+		mesh.quaternion.setFromUnitVectors(gloveUp, direction.normalize());
+		mesh.visible = true;
+	}
+
+	const wrist = glove.localJoints.get("wrist");
+	const indexMcp = glove.localJoints.get("index-finger-metacarpal");
+	const middleMcp = glove.localJoints.get("middle-finger-metacarpal");
+	const pinkyMcp = glove.localJoints.get("pinky-finger-metacarpal");
+	if (wrist && indexMcp && middleMcp && pinkyMcp) {
+		const acrossPalm = new THREE.Vector3().subVectors(indexMcp, pinkyMcp);
+		const towardFingers = new THREE.Vector3().subVectors(middleMcp, wrist);
+		if (acrossPalm.lengthSq() > 0.000001 && towardFingers.lengthSq() > 0.000001) {
+			const xAxis = acrossPalm.normalize();
+			const yAxis = towardFingers.addScaledVector(xAxis, -towardFingers.dot(xAxis)).normalize();
+			const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
+			yAxis.crossVectors(zAxis, xAxis).normalize();
+			const basis = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+			glove.palm.position.copy(wrist).add(indexMcp).add(pinkyMcp).multiplyScalar(1 / 3);
+			glove.palm.quaternion.setFromRotationMatrix(basis);
+			glove.palm.scale.set(acrossPalm.length() * 0.56, towardFingers.length() * 0.48, 0.019);
+			glove.palm.visible = true;
+		}
+	} else {
+		glove.palm.visible = false;
+	}
+}
+
+function findHandSurfaceContact(hand) {
+	hitMeshes.length = 0;
+	for (const mesh of sculptMeshes) hitMeshes.push(mesh);
+	const origin = new THREE.Vector3();
+	const direction = new THREE.Vector3();
+
+	for (const [tipName, distalName] of fingerTips) {
+		const tip = hand.joints?.[tipName];
+		const distal = hand.joints?.[distalName];
+		if (!worldJointPosition(distal, origin) || !worldJointPosition(tip, worldCenter)) continue;
+		direction.copy(worldCenter).sub(origin);
+		if (direction.lengthSq() < 0.000001) continue;
+		const segmentLength = direction.length();
+		raycaster.set(origin, direction.normalize());
+		raycaster.near = 0;
+		raycaster.far = segmentLength + 0.015;
+		const [hit] = raycaster.intersectObjects(hitMeshes, false);
+		if (hit) {
+			raycaster.far = Infinity;
+			return { mesh: hit.object, point: hit.point.clone() };
+		}
+	}
+	raycaster.far = Infinity;
+	return null;
+}
+
 const hands = [0, 1].map((index) => {
 	const hand = renderer.xr.getHand(index);
-	hand.add(handModelFactory.createHandModel(hand, "mesh"));
 	scene.add(hand);
-	return hand;
+	return createGlove(hand);
 });
 
 function updateHands(time) {
-	if (!renderer.xr.isPresenting || !clayPlacedInAR || activeMode === null) return;
-	let sculpted = false;
-	for (const hand of hands) {
-		const indexTip = hand.joints?.["index-finger-tip"];
-		const thumbTip = hand.joints?.["thumb-tip"];
-		if (!worldJointPosition(indexTip, worldHit)) continue;
-		if (!worldJointPosition(thumbTip, worldCenter)) continue;
-		const pinching = worldHit.distanceTo(worldCenter) < 0.045;
-		brushIndicator.position.copy(worldHit);
-		brushIndicator.scale.setScalar(brushRadius);
-		brushIndicator.visible = true;
-		if (!pinching || time - lastSculptTime < 55) continue;
+	if (!renderer.xr.isPresenting) return;
+	let isPulling = false;
+	let isTouching = false;
+	brushIndicator.visible = false;
 
-		let closest = null;
-		let closestDistance = Infinity;
-		for (const mesh of sculptMeshes) {
-			mesh.getWorldPosition(worldCenter);
-			const distance = worldCenter.distanceTo(worldHit);
-			if (distance < closestDistance) {
-				closest = mesh;
-				closestDistance = distance;
+	for (const glove of hands) {
+		updateGlove(glove);
+		if (!clayPlacedInAR) {
+			glove.pull = null;
+			continue;
+		}
+
+		const indexTip = glove.hand.joints?.["index-finger-tip"];
+		const thumbTip = glove.hand.joints?.["thumb-tip"];
+		if (!worldJointPosition(indexTip, worldHit) || !worldJointPosition(thumbTip, worldCenter)) {
+			glove.pull = null;
+			continue;
+		}
+
+		const pinchCenter = worldHit.clone().add(worldCenter).multiplyScalar(0.5);
+		const pinching = worldHit.distanceTo(worldCenter) < 0.045;
+		const contact = findHandSurfaceContact(glove.hand);
+
+		if (pinching && contact && !glove.pull) {
+			glove.pull = {
+				mesh: contact.mesh,
+				anchor: contact.mesh.worldToLocal(contact.point.clone()),
+				previousPinch: pinchCenter.clone(),
+				lastPullTime: 0,
+			};
+		}
+
+		if (glove.pull && pinching) {
+			if (time - glove.pull.lastPullTime >= 30) {
+				pullDelta.copy(pinchCenter).sub(glove.pull.previousPinch).clampLength(0, 0.08);
+				if (pullDelta.lengthSq() > 0.000001) {
+					pullSurface(glove.pull.mesh, glove.pull.anchor, pullDelta);
+					glove.pull.previousPinch.copy(pinchCenter);
+					glove.pull.lastPullTime = time;
+				}
+			}
+			isPulling = true;
+		} else {
+			if (glove.pull) glove.pull = null;
+			if (contact) {
+				brushIndicator.position.copy(contact.point);
+				brushIndicator.scale.setScalar(0.045);
+				brushIndicator.visible = true;
+				isTouching = true;
 			}
 		}
-		if (!closest || closestDistance > 2.5) continue;
-		closest.getWorldPosition(worldCenter);
-		worldNormal.copy(worldHit).sub(worldCenter).normalize();
-		sculptAt(worldHit, worldNormal);
-		sculpted = true;
-		lastSculptTime = time;
 	}
-	if (sculpted) setStatus("Sculpting with hands");
+
+	if (isPulling) setStatus("Pulling clay · release pinch to let go");
+	else if (isTouching) setStatus("Hand touching clay · pinch and pull to stretch");
+	else if (renderer.xr.isPresenting && clayPlacedInAR) {
+		const handTracked = hands.some((glove) =>
+			allJointNames.some((name) => glove.hand.joints?.[name]?.visible)
+		);
+		setStatus(handTracked
+			? "Touch the clay with a fingertip, then pinch and pull to stretch"
+			: "Tap the clay to sculpt; hand tracking is unavailable");
+	}
 }
 
 const xrButton = document.createElement("button");
