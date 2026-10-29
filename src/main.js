@@ -696,6 +696,10 @@ async function startCameraHands() {
 				frameRate: { ideal: 24, max: 30 },
 			},
 		});
+		const cameraTrack = cameraHandStream.getVideoTracks()[0];
+		if (!cameraTrack || cameraTrack.getSettings().facingMode !== "environment") {
+			throw new Error("The browser could not confirm the rear camera. Camera hands stopped; front-camera fallback is disabled.");
+		}
 		handCameraVideo.srcObject = cameraHandStream;
 		await handCameraVideo.play();
 		document.body.classList.add("camera-hands");
