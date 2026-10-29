@@ -131,6 +131,7 @@ let arFallbackPlacementReady = false;
 let arPlacementMode = "searching";
 let clayPlacedInAR = false;
 let arPlacementStartedAt = null;
+let switchToCameraHandsAfterAR = false;
 let savedBackground = scene.background;
 let savedFog = scene.fog;
 let cameraHandStream = null;
@@ -661,12 +662,12 @@ function updateCameraHandsButtons(isStarting) {
 	for (const button of cameraHandsButtons) {
 		button.disabled = isStarting;
 		button.textContent = isStarting
-			? "Starting camera…"
+			? "Starting Hands AR…"
 			: cameraHandsActive
-				? "Stop rear camera"
+				? "Stop Hands AR"
 				: renderer.xr.isPresenting && button === arCameraHandsButton
-					? "Exit AR · Rear camera hands"
-					: "Rear camera hands";
+					? "Switch to Hands AR"
+					: "Hands AR";
 		button.classList.toggle("is-active", cameraHandsActive);
 	}
 }
@@ -685,7 +686,7 @@ async function startCameraHands() {
 	clearError();
 	cameraHandStatus.hidden = false;
 	cameraHandStatus.textContent = "Requesting rear-camera access for hand tracking…";
-	setStatus("Requesting camera access");
+	setStatus("Starting rear-camera hand AR");
 	try {
 		const videoDevices = await navigator.mediaDevices.enumerateDevices();
 		const rearCamera = videoDevices.find((device) =>
@@ -740,8 +741,8 @@ async function startCameraHands() {
 		cameraHandsActive = true;
 		lastCameraDetectionAt = 0;
 		updateCameraHandsButtons(false);
-		cameraHandStatus.textContent = `Rear camera ready${trackLabel ? `: ${trackLabel}` : ""}. Show your hand.`;
-		setStatus("Rear-camera hand tracking ready");
+		cameraHandStatus.textContent = `Hands AR ready${trackLabel ? ` · ${trackLabel}` : ""}. Pinch over the clay to sculpt.`;
+		setStatus("Hands AR ready");
 	} catch (error) {
 		console.error("Could not start camera hand tracking:", error);
 		stopCameraHands();
@@ -771,8 +772,22 @@ function toggleCameraHands() {
 cameraHandsButton.addEventListener("click", toggleCameraHands);
 arCameraHandsButton.addEventListener("click", () => {
 	if (renderer.xr.isPresenting) {
-		setStatus("Exit AR, then start Camera hands with the rear camera");
-		arSession?.end();
+		if (!arSession) {
+			showError("Could not switch to Hands AR because the spatial AR session is unavailable.");
+			setStatus("Could not switch to Hands AR");
+			return;
+		}
+		switchToCameraHandsAfterAR = true;
+		arCameraHandsButton.disabled = true;
+		arCameraHandsButton.textContent = "Switching to Hands AR…";
+		arInstructions.textContent = "Opening the rear camera for live hand sculpting…";
+		setStatus("Switching to Hands AR");
+		arSession.end().catch((error) => {
+			switchToCameraHandsAfterAR = false;
+			console.error("Could not switch from spatial AR to Hands AR:", error);
+			showError(error instanceof Error ? error.message : "Could not switch to Hands AR.");
+			updateCameraHandsButtons(false);
+		});
 		return;
 	}
 	toggleCameraHands();
@@ -825,7 +840,7 @@ renderer.xr.addEventListener("sessionstart", async () => {
 	arPlacementStartedAt = performance.now();
 	placementReticle.visible = false;
 	arPlaceButton.textContent = "Place clay";
-	arInstructions.textContent = "Scanning for a surface. Exit AR to use Camera hands.";
+	arInstructions.textContent = "Scanning for a surface. Switch to Hands AR for live rear-camera hand sculpting.";
 	updateARPlacementAvailability(false);
 	setStatus("Scanning for a surface");
 	canvasHelp.classList.add("is-hidden");
@@ -847,6 +862,8 @@ renderer.xr.addEventListener("sessionend", () => {
 	arSurfaceFound = false;
 	arFallbackPlacementReady = false;
 	arPlacementMode = "searching";
+	const shouldStartCameraHands = switchToCameraHandsAfterAR;
+	switchToCameraHandsAfterAR = false;
 	controls.enabled = true;
 	document.documentElement.classList.remove("xr-ar");
 	document.body.classList.remove("xr-ar");
@@ -863,7 +880,11 @@ renderer.xr.addEventListener("sessionend", () => {
 	sculptRoot.scale.setScalar(1);
 	placementReticle.visible = false;
 	brushIndicator.visible = false;
-	setStatus("Ready to sculpt");
+	if (shouldStartCameraHands) {
+		startCameraHands();
+	} else {
+		setStatus("Ready to sculpt");
+	}
 });
 
 function resizeRenderer() {
