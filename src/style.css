@@ -746,7 +746,6 @@ body.xr-ar .ar-overlay {
 .hand-camera-feed {
 	z-index: 0;
 	object-fit: cover;
-	transform: scaleX(-1);
 }
 
 .hand-camera-landmarks {
@@ -777,15 +776,6 @@ body.xr-ar .ar-overlay {
 body.camera-hands .hand-camera-feed,
 body.camera-hands .hand-camera-landmarks {
 	display: block;
-}
-
-body.xr-ar.camera-hands .hand-camera-feed {
-	display: none;
-}
-
-body.xr-ar.camera-hands .camera-hand-status {
-	top: max(20px, env(safe-area-inset-top));
-	bottom: auto;
 }
 
 body.camera-hands .viewport::before,
