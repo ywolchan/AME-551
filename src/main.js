@@ -15,6 +15,7 @@ const meshInfo = document.querySelector("#mesh-info");
 const radiusInput = document.querySelector("#brush-size");
 const strengthInput = document.querySelector("#brush-strength");
 const arInstructions = document.querySelector("#ar-instructions");
+const handTrackingStatus = document.querySelector("#hand-tracking-status");
 const arPlaceButton = document.querySelector("#ar-place-button");
 
 const scene = new THREE.Scene();
@@ -123,7 +124,7 @@ let arSession = null;
 let arSurfaceFound = false;
 let clayPlacedInAR = false;
 let handTrackingStartedAt = null;
-let handTrackingNoticeShown = false;
+let lastHandTrackingMessage = "";
 let savedBackground = scene.background;
 let savedFog = scene.fog;
 
@@ -533,11 +534,19 @@ const fingerTips = [
 	["pinky-finger-tip", "pinky-finger-phalanx-distal"],
 ];
 const allJointNames = [...new Set(fingerChains.flat())];
-const gloveMaterial = new THREE.MeshStandardMaterial({
-	color: "#e7c7ae",
-	roughness: 0.48,
-	metalness: 0.02,
+const gloveMaterial = new THREE.MeshBasicMaterial({
+	color: "#ffb454",
+	toneMapped: false,
+	depthTest: false,
+	depthWrite: false,
 });
+const jointMarkerMaterial = new THREE.MeshBasicMaterial({
+	color: "#39efff",
+	toneMapped: false,
+	depthTest: false,
+	depthWrite: false,
+});
+const jointMarkerGeometry = new THREE.SphereGeometry(1, 12, 10);
 const gloveLinkGeometry = new THREE.CylinderGeometry(0.82, 1, 1, 10);
 const glovePalmGeometry = new THREE.SphereGeometry(1, 20, 14);
 const gloveUp = new THREE.Vector3(0, 1, 0);
@@ -547,6 +556,7 @@ function createGlove(hand) {
 	const group = new THREE.Group();
 	const links = [];
 	const localJoints = new Map();
+	const jointMarkers = new Map();
 	const palm = new THREE.Mesh(glovePalmGeometry, gloveMaterial);
 	palm.scale.set(0.045, 0.018, 0.06);
 	group.add(palm);
@@ -567,10 +577,11 @@ function createGlove(hand) {
 		if (!handMesh) return;
 		handMesh.material = gloveMaterial;
 		handMesh.frustumCulled = false;
+		handMesh.renderOrder = 20;
 	});
 
 	hand.add(group);
-	return { hand, group, links, localJoints, palm, pull: null };
+	return { hand, group, links, localJoints, jointMarkers, palm, pull: null };
 }
 
 function updateGlove(glove) {
@@ -585,6 +596,17 @@ function updateGlove(glove) {
 
 		const localPosition = joint.position.clone();
 		glove.localJoints.set(name, localPosition);
+
+		let marker = glove.jointMarkers.get(name);
+		if (!marker) {
+			marker = new THREE.Mesh(jointMarkerGeometry, jointMarkerMaterial);
+			marker.renderOrder = 21;
+			marker.position.set(0, 0, 0);
+			joint.add(marker);
+			glove.jointMarkers.set(name, marker);
+		}
+		const radius = joint.jointRadius || (name === "wrist" ? 0.018 : 0.011);
+		marker.scale.setScalar(radius * 1.7);
 	}
 
 	for (const { mesh, start, end } of glove.links) {
@@ -604,6 +626,7 @@ function updateGlove(glove) {
 		mesh.position.copy(startPosition).add(endPosition).multiplyScalar(0.5);
 		mesh.scale.set(0.009, length, 0.009);
 		mesh.quaternion.setFromUnitVectors(gloveUp, direction.normalize());
+		mesh.renderOrder = 20;
 		mesh.visible = true;
 	}
 
@@ -666,14 +689,15 @@ function updateHands(time) {
 	if (!renderer.xr.isPresenting) return;
 	let isPulling = false;
 	let isTouching = false;
-	let handTracked = false;
+	let trackedJointCount = 0;
+	let trackedHandCount = 0;
 	brushIndicator.visible = false;
 
 	for (const glove of hands) {
 		updateGlove(glove);
-		if (allJointNames.some((name) => glove.hand.joints?.[name]?.visible)) {
-			handTracked = true;
-		}
+		const visibleJointCount = allJointNames.filter((name) => glove.hand.joints?.[name]?.visible).length;
+		trackedJointCount += visibleJointCount;
+		if (visibleJointCount > 0) trackedHandCount += 1;
 		if (!clayPlacedInAR) {
 			glove.pull = null;
 			continue;
@@ -720,22 +744,25 @@ function updateHands(time) {
 		}
 	}
 
-	if (handTracked && !handTrackingNoticeShown) {
-		handTrackingNoticeShown = true;
-		arInstructions.textContent = clayPlacedInAR
-			? "Hands detected. Touch the clay with a fingertip, pinch, then pull to stretch."
-			: "Hands detected. Place the clay, then touch it with a fingertip and pinch to pull.";
+	const inputHandCount = Array.from(arSession?.inputSources ?? [])
+		.filter((inputSource) => inputSource.hand).length;
+	let trackingMessage = "Hand tracking: checking...";
+	if (trackedJointCount > 0) {
+		trackingMessage = `Hand tracking active: ${trackedHandCount} hand${trackedHandCount === 1 ? "" : "s"}, ${trackedJointCount} joints. Cyan dots mark tracked joints.`;
+	} else if (inputHandCount > 0) {
+		trackingMessage = "Hand input detected, but no joint poses yet. Keep your hands in view and check tracking permissions.";
+	} else if (handTrackingStartedAt !== null && time - handTrackingStartedAt > 2500) {
+		trackingMessage = "No hand-tracking input detected. This browser/device may not support WebXR hand tracking.";
 	}
-
-	if (!handTracked && !handTrackingNoticeShown && handTrackingStartedAt !== null && time - handTrackingStartedAt > 2500) {
-		handTrackingNoticeShown = true;
-		arInstructions.textContent = "Hand tracking is not available in this browser or device. You can still tap the clay to sculpt.";
+	if (trackingMessage !== lastHandTrackingMessage) {
+		handTrackingStatus.textContent = trackingMessage;
+		lastHandTrackingMessage = trackingMessage;
 	}
 
 	if (isPulling) setStatus("Pulling clay · release pinch to let go");
 	else if (isTouching) setStatus("Hand touching clay · pinch and pull to stretch");
-	else if (handTracked && renderer.xr.isPresenting && clayPlacedInAR) setStatus("Touch the clay with a fingertip, then pinch and pull to stretch");
-	else if (handTrackingNoticeShown && renderer.xr.isPresenting && clayPlacedInAR) setStatus("Tap the clay to sculpt; hand tracking is unavailable");
+	else if (trackedJointCount > 0 && clayPlacedInAR) setStatus("Touch the clay with a fingertip, then pinch and pull to stretch");
+	else if (trackingMessage.startsWith("No hand-tracking")) setStatus("Tap the clay to sculpt; hand tracking is unavailable");
 }
 
 const xrButton = document.createElement("button");
@@ -768,7 +795,7 @@ document.querySelector("#xr-button-container").append(xrButton);
 renderer.xr.addEventListener("sessionstart", async () => {
 	controls.enabled = false;
 	handTrackingStartedAt = null;
-	handTrackingNoticeShown = false;
+	lastHandTrackingMessage = "";
 	document.documentElement.classList.add("xr-ar");
 	document.body.classList.add("xr-ar");
 	scene.background = null;
@@ -780,6 +807,7 @@ renderer.xr.addEventListener("sessionstart", async () => {
 	sculptRoot.visible = false;
 	clayPlacedInAR = false;
 	handTrackingStartedAt = performance.now();
+	handTrackingStatus.textContent = "Hand tracking: checking...";
 	placementReticle.visible = false;
 	arPlaceButton.textContent = "Place clay";
 	arInstructions.textContent = "Scanning for a surface. Hand tracking will appear here if supported by your browser.";
@@ -801,7 +829,7 @@ renderer.xr.addEventListener("sessionend", () => {
 	hitTestReferenceSpace = null;
 	arSession = null;
 	handTrackingStartedAt = null;
-	handTrackingNoticeShown = false;
+	lastHandTrackingMessage = "";
 	controls.enabled = true;
 	document.documentElement.classList.remove("xr-ar");
 	document.body.classList.remove("xr-ar");

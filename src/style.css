@@ -501,6 +501,19 @@ body.xr-ar .ar-overlay {
 	text-shadow: 0 1px 5px #0008;
 }
 
+.hand-tracking-status {
+	max-width: min(460px, 100%);
+	padding: 8px 13px;
+	border: 1px solid #39efff70;
+	border-radius: 12px;
+	background: #101b20e8;
+	color: #a9f7ff;
+	font-size: 12px;
+	line-height: 1.4;
+	text-align: center;
+	text-shadow: 0 1px 5px #0008;
+}
+
 .ar-place-button {
 	min-height: 48px;
 	padding: 0 24px;
