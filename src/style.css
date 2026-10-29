@@ -458,6 +458,11 @@ body.xr-ar .viewport {
 	background: transparent;
 }
 
+html.xr-ar,
+html.xr-ar body {
+	background: transparent !important;
+}
+
 body.xr-ar .viewport::before,
 body.xr-ar .viewport-glow,
 body.xr-ar .viewport-caption,

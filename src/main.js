@@ -553,9 +553,12 @@ xrButton.addEventListener("click", async () => {
 document.querySelector("#xr-button-container").append(xrButton);
 renderer.xr.addEventListener("sessionstart", async () => {
 	controls.enabled = false;
+	document.documentElement.classList.add("xr-ar");
 	document.body.classList.add("xr-ar");
 	scene.background = null;
 	scene.fog = null;
+	renderer.setClearColor(0x000000, 0);
+	renderer.setClearAlpha(0);
 	ground.visible = false;
 	groundGrid.visible = false;
 	sculptRoot.visible = false;
@@ -580,9 +583,12 @@ renderer.xr.addEventListener("sessionend", () => {
 	hitTestReferenceSpace = null;
 	arSession = null;
 	controls.enabled = true;
+	document.documentElement.classList.remove("xr-ar");
 	document.body.classList.remove("xr-ar");
 	scene.background = savedBackground;
 	scene.fog = savedFog;
+	renderer.setClearColor(0x000000, 0);
+	renderer.setClearAlpha(0);
 	ground.visible = true;
 	groundGrid.visible = true;
 	sculptRoot.visible = true;
