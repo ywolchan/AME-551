@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { ThreeMFLoader } from "three/addons/loaders/3MFLoader.js";
+import { XRHandModelFactory } from "three/addons/webxr/XRHandModelFactory.js";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import "./style.css";
 
@@ -121,6 +122,8 @@ let hitTestReferenceSpace = null;
 let arSession = null;
 let arSurfaceFound = false;
 let clayPlacedInAR = false;
+let handTrackingStartedAt = null;
+let handTrackingNoticeShown = false;
 let savedBackground = scene.background;
 let savedFog = scene.fog;
 
@@ -535,27 +538,18 @@ const gloveMaterial = new THREE.MeshStandardMaterial({
 	roughness: 0.48,
 	metalness: 0.02,
 });
-const gloveJointGeometry = new THREE.SphereGeometry(1, 12, 10);
 const gloveLinkGeometry = new THREE.CylinderGeometry(0.82, 1, 1, 10);
 const glovePalmGeometry = new THREE.SphereGeometry(1, 20, 14);
 const gloveUp = new THREE.Vector3(0, 1, 0);
+const handModelFactory = new XRHandModelFactory();
 
 function createGlove(hand) {
 	const group = new THREE.Group();
-	const joints = new Map();
 	const links = [];
 	const localJoints = new Map();
 	const palm = new THREE.Mesh(glovePalmGeometry, gloveMaterial);
 	palm.scale.set(0.045, 0.018, 0.06);
 	group.add(palm);
-
-	for (const name of allJointNames) {
-		const joint = new THREE.Mesh(gloveJointGeometry, gloveMaterial);
-		joint.scale.setScalar(name === "wrist" ? 0.021 : name.endsWith("-tip") ? 0.009 : 0.013);
-		joint.visible = false;
-		group.add(joint);
-		joints.set(name, joint);
-	}
 
 	for (const chain of fingerChains) {
 		for (let index = 0; index < chain.length - 1; index += 1) {
@@ -566,27 +560,31 @@ function createGlove(hand) {
 		}
 	}
 
+	const handModel = handModelFactory.createHandModel(hand, "spheres");
+	hand.add(handModel);
+	hand.addEventListener("connected", () => {
+		const handMesh = handModel.motionController?.handMesh;
+		if (!handMesh) return;
+		handMesh.material = gloveMaterial;
+		handMesh.frustumCulled = false;
+	});
+
 	hand.add(group);
-	return { hand, group, joints, links, localJoints, palm, pull: null };
+	return { hand, group, links, localJoints, palm, pull: null };
 }
 
 function updateGlove(glove) {
 	glove.hand.updateWorldMatrix(true, true);
-	glove.group.updateWorldMatrix(true, false);
 	glove.localJoints.clear();
 
 	for (const name of allJointNames) {
 		const joint = glove.hand.joints?.[name];
-		const jointMesh = glove.joints.get(name);
 		if (!worldJointPosition(joint, worldHit)) {
-			jointMesh.visible = false;
 			continue;
 		}
 
-		const localPosition = glove.group.worldToLocal(worldHit.clone());
+		const localPosition = joint.position.clone();
 		glove.localJoints.set(name, localPosition);
-		jointMesh.position.copy(localPosition);
-		jointMesh.visible = true;
 	}
 
 	for (const { mesh, start, end } of glove.links) {
@@ -668,10 +666,14 @@ function updateHands(time) {
 	if (!renderer.xr.isPresenting) return;
 	let isPulling = false;
 	let isTouching = false;
+	let handTracked = false;
 	brushIndicator.visible = false;
 
 	for (const glove of hands) {
 		updateGlove(glove);
+		if (allJointNames.some((name) => glove.hand.joints?.[name]?.visible)) {
+			handTracked = true;
+		}
 		if (!clayPlacedInAR) {
 			glove.pull = null;
 			continue;
@@ -718,16 +720,22 @@ function updateHands(time) {
 		}
 	}
 
+	if (handTracked && !handTrackingNoticeShown) {
+		handTrackingNoticeShown = true;
+		arInstructions.textContent = clayPlacedInAR
+			? "Hands detected. Touch the clay with a fingertip, pinch, then pull to stretch."
+			: "Hands detected. Place the clay, then touch it with a fingertip and pinch to pull.";
+	}
+
+	if (!handTracked && !handTrackingNoticeShown && handTrackingStartedAt !== null && time - handTrackingStartedAt > 2500) {
+		handTrackingNoticeShown = true;
+		arInstructions.textContent = "Hand tracking is not available in this browser or device. You can still tap the clay to sculpt.";
+	}
+
 	if (isPulling) setStatus("Pulling clay · release pinch to let go");
 	else if (isTouching) setStatus("Hand touching clay · pinch and pull to stretch");
-	else if (renderer.xr.isPresenting && clayPlacedInAR) {
-		const handTracked = hands.some((glove) =>
-			allJointNames.some((name) => glove.hand.joints?.[name]?.visible)
-		);
-		setStatus(handTracked
-			? "Touch the clay with a fingertip, then pinch and pull to stretch"
-			: "Tap the clay to sculpt; hand tracking is unavailable");
-	}
+	else if (handTracked && renderer.xr.isPresenting && clayPlacedInAR) setStatus("Touch the clay with a fingertip, then pinch and pull to stretch");
+	else if (handTrackingNoticeShown && renderer.xr.isPresenting && clayPlacedInAR) setStatus("Tap the clay to sculpt; hand tracking is unavailable");
 }
 
 const xrButton = document.createElement("button");
@@ -759,6 +767,8 @@ xrButton.addEventListener("click", async () => {
 document.querySelector("#xr-button-container").append(xrButton);
 renderer.xr.addEventListener("sessionstart", async () => {
 	controls.enabled = false;
+	handTrackingStartedAt = null;
+	handTrackingNoticeShown = false;
 	document.documentElement.classList.add("xr-ar");
 	document.body.classList.add("xr-ar");
 	scene.background = null;
@@ -769,8 +779,10 @@ renderer.xr.addEventListener("sessionstart", async () => {
 	groundGrid.visible = false;
 	sculptRoot.visible = false;
 	clayPlacedInAR = false;
+	handTrackingStartedAt = performance.now();
 	placementReticle.visible = false;
 	arPlaceButton.textContent = "Place clay";
+	arInstructions.textContent = "Scanning for a surface. Hand tracking will appear here if supported by your browser.";
 	updateARPlacementAvailability(false);
 	setStatus("Scanning for a surface");
 	canvasHelp.classList.add("is-hidden");
@@ -788,6 +800,8 @@ renderer.xr.addEventListener("sessionend", () => {
 	hitTestSource = null;
 	hitTestReferenceSpace = null;
 	arSession = null;
+	handTrackingStartedAt = null;
+	handTrackingNoticeShown = false;
 	controls.enabled = true;
 	document.documentElement.classList.remove("xr-ar");
 	document.body.classList.remove("xr-ar");
