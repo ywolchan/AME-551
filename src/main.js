@@ -130,6 +130,7 @@ const pointer = new THREE.Vector2();
 const worldNormal = new THREE.Vector3();
 const worldCenter = new THREE.Vector3();
 const worldHit = new THREE.Vector3();
+const reticleQuaternion = new THREE.Quaternion();
 const localHit = new THREE.Vector3();
 const localDirection = new THREE.Vector3();
 const localVertex = new THREE.Vector3();
@@ -428,10 +429,10 @@ function updateARPlacementAvailability(found) {
 
 function placeClayAtReticle() {
 	if (!arSurfaceFound || !placementReticle.visible) return;
-	placementReticle.matrix.decompose(worldHit, worldCenter, worldScale);
-	sculptRoot.quaternion.copy(worldCenter);
+	placementReticle.matrix.decompose(worldHit, reticleQuaternion, worldScale);
+	sculptRoot.quaternion.copy(reticleQuaternion);
 	sculptRoot.scale.setScalar(0.28);
-	worldNormal.set(0, 1, 0).applyQuaternion(worldCenter).normalize();
+	worldNormal.set(0, 1, 0).applyQuaternion(reticleQuaternion).normalize();
 	sculptRoot.position.copy(worldHit).addScaledVector(worldNormal, 0.82 * 0.28);
 	sculptRoot.visible = true;
 	clayPlacedInAR = true;
