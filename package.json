@@ -9,6 +9,7 @@
 		"preview": "vite preview --host 0.0.0.0"
 	},
 	"dependencies": {
+		"@mediapipe/tasks-vision": "^1.2.0",
 		"three": "^0.186.1"
 	},
 	"devDependencies": {

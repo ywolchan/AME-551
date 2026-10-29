@@ -3,7 +3,6 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { ThreeMFLoader } from "three/addons/loaders/3MFLoader.js";
-import { XRHandModelFactory } from "three/addons/webxr/XRHandModelFactory.js";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import "./style.css";
 
@@ -15,8 +14,12 @@ const meshInfo = document.querySelector("#mesh-info");
 const radiusInput = document.querySelector("#brush-size");
 const strengthInput = document.querySelector("#brush-strength");
 const arInstructions = document.querySelector("#ar-instructions");
-const handTrackingStatus = document.querySelector("#hand-tracking-status");
 const arPlaceButton = document.querySelector("#ar-place-button");
+const cameraHandsButton = document.querySelector("#camera-hands-button");
+const handCameraVideo = document.querySelector("#hand-camera-feed");
+const handCameraLandmarks = document.querySelector("#hand-camera-landmarks");
+const cameraHandStatus = document.querySelector("#camera-hand-status");
+const handCameraContext = handCameraLandmarks.getContext("2d");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#1a1b21");
@@ -125,25 +128,33 @@ let arSurfaceFound = false;
 let arFallbackPlacementReady = false;
 let arPlacementMode = "searching";
 let clayPlacedInAR = false;
-let handTrackingStartedAt = null;
-let lastHandTrackingMessage = "";
+let arPlacementStartedAt = null;
 let savedBackground = scene.background;
 let savedFog = scene.fog;
+let cameraHandStream = null;
+let handLandmarker = null;
+let cameraHandsActive = false;
+let lastCameraDetectionAt = 0;
+
+const handConnections = [
+	[0, 1], [1, 2], [2, 3], [3, 4],
+	[0, 5], [5, 6], [6, 7], [7, 8],
+	[0, 9], [9, 10], [10, 11], [11, 12],
+	[0, 13], [13, 14], [14, 15], [15, 16],
+	[0, 17], [17, 18], [18, 19], [19, 20],
+	[5, 9], [9, 13], [13, 17],
+];
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const worldNormal = new THREE.Vector3();
-const worldCenter = new THREE.Vector3();
 const worldHit = new THREE.Vector3();
 const reticleQuaternion = new THREE.Quaternion();
 const localHit = new THREE.Vector3();
-const localDelta = new THREE.Vector3();
 const localDirection = new THREE.Vector3();
 const localVertex = new THREE.Vector3();
 const inverseWorld = new THREE.Matrix4();
-const inverseLinear = new THREE.Matrix3();
 const worldScale = new THREE.Vector3();
-const pullDelta = new THREE.Vector3();
 const hitMeshes = [];
 
 function setStatus(message) {
@@ -256,37 +267,6 @@ function sculptAt(worldPosition, direction, mode = activeMode) {
 			mesh.geometry.computeVertexNormals();
 			mesh.geometry.computeBoundingSphere();
 		}
-	}
-}
-
-function pullSurface(mesh, localAnchor, worldDisplacement) {
-	mesh.updateWorldMatrix(true, false);
-	inverseWorld.copy(mesh.matrixWorld).invert();
-	inverseLinear.setFromMatrix4(inverseWorld);
-	localDelta.copy(worldDisplacement).applyMatrix3(inverseLinear);
-	mesh.getWorldScale(worldScale);
-	const averageScale = (Math.abs(worldScale.x) + Math.abs(worldScale.y) + Math.abs(worldScale.z)) / 3;
-	const radius = brushRadius / Math.max(averageScale, 0.0001);
-	const radiusSquared = radius * radius;
-	const position = mesh.geometry.attributes.position;
-	let changed = false;
-
-	for (let index = 0; index < position.count; index += 1) {
-		localVertex.fromBufferAttribute(position, index);
-		const distanceSquared = localVertex.distanceToSquared(localAnchor);
-		if (distanceSquared >= radiusSquared) continue;
-
-		const distance = Math.sqrt(distanceSquared);
-		const weight = Math.pow(1 - distance / radius, 2);
-		localVertex.addScaledVector(localDelta, weight);
-		position.setXYZ(index, localVertex.x, localVertex.y, localVertex.z);
-		changed = true;
-	}
-
-	if (changed) {
-		position.needsUpdate = true;
-		mesh.geometry.computeVertexNormals();
-		mesh.geometry.computeBoundingSphere();
 	}
 }
 
@@ -509,7 +489,7 @@ function placeClayAtReticle() {
 	sculptRoot.visible = true;
 	clayPlacedInAR = true;
 	updateARPlacementAvailability(false);
-	arInstructions.textContent = "Clay placed. Tap it to sculpt, or touch it with a fingertip, pinch, then pull.";
+	arInstructions.textContent = "Clay placed. Tap the clay to sculpt.";
 	setStatus("Clay placed in AR");
 }
 
@@ -547,257 +527,211 @@ window.addEventListener("keydown", (event) => {
 	}
 });
 
-function worldJointPosition(joint, destination) {
-	if (!joint || !joint.visible) return false;
-	joint.getWorldPosition(destination);
-	return true;
+function cameraPointForLandmark(landmark) {
+	const bounds = viewport.getBoundingClientRect();
+	const videoWidth = handCameraVideo.videoWidth;
+	const videoHeight = handCameraVideo.videoHeight;
+	if (!bounds.width || !bounds.height || !videoWidth || !videoHeight) return null;
+
+	const scale = Math.max(bounds.width / videoWidth, bounds.height / videoHeight);
+	const displayedWidth = videoWidth * scale;
+	const displayedHeight = videoHeight * scale;
+	return {
+		x: (1 - landmark.x) * displayedWidth - (displayedWidth - bounds.width) / 2,
+		y: landmark.y * displayedHeight - (displayedHeight - bounds.height) / 2,
+	};
 }
 
-const fingerChains = [
-	["wrist", "thumb-metacarpal", "thumb-phalanx-proximal", "thumb-phalanx-distal", "thumb-tip"],
-	["wrist", "index-finger-metacarpal", "index-finger-phalanx-proximal", "index-finger-phalanx-intermediate", "index-finger-phalanx-distal", "index-finger-tip"],
-	["wrist", "middle-finger-metacarpal", "middle-finger-phalanx-proximal", "middle-finger-phalanx-intermediate", "middle-finger-phalanx-distal", "middle-finger-tip"],
-	["wrist", "ring-finger-metacarpal", "ring-finger-phalanx-proximal", "ring-finger-phalanx-intermediate", "ring-finger-phalanx-distal", "ring-finger-tip"],
-	["wrist", "pinky-finger-metacarpal", "pinky-finger-phalanx-proximal", "pinky-finger-phalanx-intermediate", "pinky-finger-phalanx-distal", "pinky-finger-tip"],
-];
-const fingerTips = [
-	["thumb-tip", "thumb-phalanx-distal"],
-	["index-finger-tip", "index-finger-phalanx-distal"],
-	["middle-finger-tip", "middle-finger-phalanx-distal"],
-	["ring-finger-tip", "ring-finger-phalanx-distal"],
-	["pinky-finger-tip", "pinky-finger-phalanx-distal"],
-];
-const allJointNames = [...new Set(fingerChains.flat())];
-const gloveMaterial = new THREE.MeshBasicMaterial({
-	color: "#ffb454",
-	toneMapped: false,
-	depthTest: false,
-	depthWrite: false,
-});
-const jointMarkerMaterial = new THREE.MeshBasicMaterial({
-	color: "#39efff",
-	toneMapped: false,
-	depthTest: false,
-	depthWrite: false,
-});
-const jointMarkerGeometry = new THREE.SphereGeometry(1, 12, 10);
-const gloveLinkGeometry = new THREE.CylinderGeometry(0.82, 1, 1, 10);
-const glovePalmGeometry = new THREE.SphereGeometry(1, 20, 14);
-const gloveUp = new THREE.Vector3(0, 1, 0);
-const handModelFactory = new XRHandModelFactory();
+function drawCameraHandLandmarks(hands) {
+	const bounds = viewport.getBoundingClientRect();
+	handCameraContext.clearRect(0, 0, bounds.width, bounds.height);
+	handCameraContext.lineWidth = 2;
+	handCameraContext.strokeStyle = "#69f1d8";
+	handCameraContext.fillStyle = "#a8ffed";
 
-function createGlove(hand) {
-	const group = new THREE.Group();
-	const links = [];
-	const localJoints = new Map();
-	const jointMarkers = new Map();
-	const palm = new THREE.Mesh(glovePalmGeometry, gloveMaterial);
-	palm.scale.set(0.045, 0.018, 0.06);
-	group.add(palm);
-
-	for (const chain of fingerChains) {
-		for (let index = 0; index < chain.length - 1; index += 1) {
-			const link = new THREE.Mesh(gloveLinkGeometry, gloveMaterial);
-			link.visible = false;
-			group.add(link);
-			links.push({ mesh: link, start: chain[index], end: chain[index + 1] });
+	for (const landmarks of hands) {
+		const points = landmarks.map(cameraPointForLandmark);
+		handCameraContext.beginPath();
+		for (const [start, end] of handConnections) {
+			const startPoint = points[start];
+			const endPoint = points[end];
+			if (!startPoint || !endPoint) continue;
+			handCameraContext.moveTo(startPoint.x, startPoint.y);
+			handCameraContext.lineTo(endPoint.x, endPoint.y);
 		}
-	}
+		handCameraContext.stroke();
 
-	const handModel = handModelFactory.createHandModel(hand, "spheres");
-	hand.add(handModel);
-	hand.addEventListener("connected", () => {
-		const handMesh = handModel.motionController?.handMesh;
-		if (!handMesh) return;
-		handMesh.material = gloveMaterial;
-		handMesh.frustumCulled = false;
-		handMesh.renderOrder = 20;
-	});
-
-	hand.add(group);
-	return { hand, group, links, localJoints, jointMarkers, palm, pull: null };
-}
-
-function updateGlove(glove) {
-	glove.hand.updateWorldMatrix(true, true);
-	glove.localJoints.clear();
-
-	for (const name of allJointNames) {
-		const joint = glove.hand.joints?.[name];
-		if (!worldJointPosition(joint, worldHit)) {
-			continue;
+		for (const index of [4, 8]) {
+			const point = points[index];
+			if (!point) continue;
+			handCameraContext.beginPath();
+			handCameraContext.arc(point.x, point.y, 5, 0, Math.PI * 2);
+			handCameraContext.fill();
 		}
-
-		const localPosition = joint.position.clone();
-		glove.localJoints.set(name, localPosition);
-
-		let marker = glove.jointMarkers.get(name);
-		if (!marker) {
-			marker = new THREE.Mesh(jointMarkerGeometry, jointMarkerMaterial);
-			marker.renderOrder = 21;
-			marker.position.set(0, 0, 0);
-			joint.add(marker);
-			glove.jointMarkers.set(name, marker);
-		}
-		const radius = joint.jointRadius || (name === "wrist" ? 0.018 : 0.011);
-		marker.scale.setScalar(radius * 1.7);
-	}
-
-	for (const { mesh, start, end } of glove.links) {
-		const startPosition = glove.localJoints.get(start);
-		const endPosition = glove.localJoints.get(end);
-		if (!startPosition || !endPosition) {
-			mesh.visible = false;
-			continue;
-		}
-
-		const direction = endPosition.clone().sub(startPosition);
-		const length = direction.length();
-		if (length < 0.001) {
-			mesh.visible = false;
-			continue;
-		}
-		mesh.position.copy(startPosition).add(endPosition).multiplyScalar(0.5);
-		mesh.scale.set(0.009, length, 0.009);
-		mesh.quaternion.setFromUnitVectors(gloveUp, direction.normalize());
-		mesh.renderOrder = 20;
-		mesh.visible = true;
-	}
-
-	const wrist = glove.localJoints.get("wrist");
-	const indexMcp = glove.localJoints.get("index-finger-metacarpal");
-	const middleMcp = glove.localJoints.get("middle-finger-metacarpal");
-	const pinkyMcp = glove.localJoints.get("pinky-finger-metacarpal");
-	if (wrist && indexMcp && middleMcp && pinkyMcp) {
-		const acrossPalm = new THREE.Vector3().subVectors(indexMcp, pinkyMcp);
-		const towardFingers = new THREE.Vector3().subVectors(middleMcp, wrist);
-		if (acrossPalm.lengthSq() > 0.000001 && towardFingers.lengthSq() > 0.000001) {
-			const xAxis = acrossPalm.normalize();
-			const yAxis = towardFingers.addScaledVector(xAxis, -towardFingers.dot(xAxis)).normalize();
-			const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
-			yAxis.crossVectors(zAxis, xAxis).normalize();
-			const basis = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
-			glove.palm.position.copy(wrist).add(indexMcp).add(pinkyMcp).multiplyScalar(1 / 3);
-			glove.palm.quaternion.setFromRotationMatrix(basis);
-			glove.palm.scale.set(acrossPalm.length() * 0.56, towardFingers.length() * 0.48, 0.019);
-			glove.palm.visible = true;
-		}
-	} else {
-		glove.palm.visible = false;
 	}
 }
 
-function findHandSurfaceContact(hand) {
+function raycastCameraHand(point) {
+	const bounds = renderer.domElement.getBoundingClientRect();
+	pointer.set((point.x / bounds.width) * 2 - 1, -(point.y / bounds.height) * 2 + 1);
+	raycaster.setFromCamera(pointer, camera);
 	hitMeshes.length = 0;
 	for (const mesh of sculptMeshes) hitMeshes.push(mesh);
-	const origin = new THREE.Vector3();
-	const direction = new THREE.Vector3();
+	return raycaster.intersectObjects(hitMeshes, false)[0] ?? null;
+}
 
-	for (const [tipName, distalName] of fingerTips) {
-		const tip = hand.joints?.[tipName];
-		const distal = hand.joints?.[distalName];
-		if (!worldJointPosition(distal, origin) || !worldJointPosition(tip, worldCenter)) continue;
-		direction.copy(worldCenter).sub(origin);
-		if (direction.lengthSq() < 0.000001) continue;
-		const segmentLength = direction.length();
-		raycaster.set(origin, direction.normalize());
-		raycaster.near = 0;
-		raycaster.far = segmentLength + 0.015;
-		const [hit] = raycaster.intersectObjects(hitMeshes, false);
+function updateCameraHandTracking(time) {
+	if (!cameraHandsActive || !handLandmarker || handCameraVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+	if (time - lastCameraDetectionAt < 75) return;
+	lastCameraDetectionAt = time;
+
+	try {
+		const result = handLandmarker.detectForVideo(handCameraVideo, time);
+		const detectedHands = result.landmarks ?? [];
+		drawCameraHandLandmarks(detectedHands);
+		if (!detectedHands.length) {
+			brushIndicator.visible = false;
+			cameraHandStatus.textContent = "Show your hand to the front camera.";
+			return;
+		}
+
+		const landmarks = detectedHands[0];
+		const thumbTip = landmarks[4];
+		const indexTip = landmarks[8];
+		const isPinching = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y) < 0.06;
+		const handPoint = cameraPointForLandmark(isPinching
+			? { x: (thumbTip.x + indexTip.x) / 2, y: (thumbTip.y + indexTip.y) / 2 }
+			: indexTip);
+		if (!handPoint) return;
+
+		const hit = raycastCameraHand(handPoint);
 		if (hit) {
-			raycaster.far = Infinity;
-			return { mesh: hit.object, point: hit.point.clone() };
-		}
-	}
-	raycaster.far = Infinity;
-	return null;
-}
-
-const hands = [0, 1].map((index) => {
-	const hand = renderer.xr.getHand(index);
-	scene.add(hand);
-	return createGlove(hand);
-});
-
-function updateHands(time) {
-	if (!renderer.xr.isPresenting) return;
-	let isPulling = false;
-	let isTouching = false;
-	let trackedJointCount = 0;
-	let trackedHandCount = 0;
-	brushIndicator.visible = false;
-
-	for (const glove of hands) {
-		updateGlove(glove);
-		const visibleJointCount = allJointNames.filter((name) => glove.hand.joints?.[name]?.visible).length;
-		trackedJointCount += visibleJointCount;
-		if (visibleJointCount > 0) trackedHandCount += 1;
-		if (!clayPlacedInAR) {
-			glove.pull = null;
-			continue;
-		}
-
-		const indexTip = glove.hand.joints?.["index-finger-tip"];
-		const thumbTip = glove.hand.joints?.["thumb-tip"];
-		if (!worldJointPosition(indexTip, worldHit) || !worldJointPosition(thumbTip, worldCenter)) {
-			glove.pull = null;
-			continue;
-		}
-
-		const pinchCenter = worldHit.clone().add(worldCenter).multiplyScalar(0.5);
-		const pinching = worldHit.distanceTo(worldCenter) < 0.045;
-		const contact = findHandSurfaceContact(glove.hand);
-
-		if (pinching && contact && !glove.pull) {
-			glove.pull = {
-				mesh: contact.mesh,
-				anchor: contact.mesh.worldToLocal(contact.point.clone()),
-				previousPinch: pinchCenter.clone(),
-				lastPullTime: 0,
-			};
-		}
-
-		if (glove.pull && pinching) {
-			if (time - glove.pull.lastPullTime >= 30) {
-				pullDelta.copy(pinchCenter).sub(glove.pull.previousPinch).clampLength(0, 0.08);
-				if (pullDelta.lengthSq() > 0.000001) {
-					pullSurface(glove.pull.mesh, glove.pull.anchor, pullDelta);
-					glove.pull.previousPinch.copy(pinchCenter);
-					glove.pull.lastPullTime = time;
-				}
+			worldHit.copy(hit.point);
+			worldNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld).normalize();
+			brushIndicator.position.copy(worldHit);
+			brushIndicator.scale.setScalar(brushRadius);
+			brushIndicator.visible = true;
+			canvasHelp.classList.add("is-hidden");
+			if (isPinching) {
+				sculptAt(worldHit, worldNormal);
+				cameraHandStatus.textContent = "Pinching to sculpt · release to stop.";
+				setStatus(activeMode === "raise" ? "Raising clay with hand tracking" : "Lowering clay with hand tracking");
+			} else {
+				cameraHandStatus.textContent = "Pinch thumb and index finger over the clay to sculpt.";
 			}
-			isPulling = true;
 		} else {
-			if (glove.pull) glove.pull = null;
-			if (contact) {
-				brushIndicator.position.copy(contact.point);
-				brushIndicator.scale.setScalar(0.045);
-				brushIndicator.visible = true;
-				isTouching = true;
-			}
+			brushIndicator.visible = false;
+			cameraHandStatus.textContent = isPinching
+				? "Move your pinch over the clay to sculpt."
+				: "Move your index fingertip over the clay, then pinch to sculpt.";
 		}
+	} catch (error) {
+		console.error("Camera hand tracking failed:", error);
+		stopCameraHands();
+		showError(error instanceof Error ? `Camera hand tracking stopped: ${error.message}` : "Camera hand tracking stopped unexpectedly.");
+		setStatus("Camera hand tracking stopped");
 	}
-
-	const inputHandCount = Array.from(arSession?.inputSources ?? [])
-		.filter((inputSource) => inputSource.hand).length;
-	let trackingMessage = "Hand tracking: checking...";
-	if (trackedJointCount > 0) {
-		trackingMessage = `Hand tracking active: ${trackedHandCount} hand${trackedHandCount === 1 ? "" : "s"}, ${trackedJointCount} joints. Cyan dots mark tracked joints.`;
-	} else if (inputHandCount > 0) {
-		trackingMessage = "Hand input detected, but no joint poses yet. Keep your hands in view and check tracking permissions.";
-	} else if (handTrackingStartedAt !== null && time - handTrackingStartedAt > 2500) {
-		trackingMessage = "No hand-tracking input detected. This browser/device may not support WebXR hand tracking.";
-	}
-	if (trackingMessage !== lastHandTrackingMessage) {
-		handTrackingStatus.textContent = trackingMessage;
-		lastHandTrackingMessage = trackingMessage;
-	}
-
-	if (isPulling) setStatus("Pulling clay · release pinch to let go");
-	else if (isTouching) setStatus("Hand touching clay · pinch and pull to stretch");
-	else if (trackedJointCount > 0 && clayPlacedInAR) setStatus("Touch the clay with a fingertip, then pinch and pull to stretch");
-	else if (trackingMessage.startsWith("No hand-tracking")) setStatus("Tap the clay to sculpt; hand tracking is unavailable");
 }
+
+function stopCameraHands() {
+	cameraHandsActive = false;
+	handLandmarker?.close();
+	handLandmarker = null;
+	cameraHandStream?.getTracks().forEach((track) => track.stop());
+	cameraHandStream = null;
+	handCameraVideo.pause();
+	handCameraVideo.srcObject = null;
+	handCameraContext.clearRect(0, 0, handCameraLandmarks.width, handCameraLandmarks.height);
+	document.body.classList.remove("camera-hands");
+	cameraHandStatus.hidden = true;
+	brushIndicator.visible = false;
+	ground.visible = true;
+	groundGrid.visible = true;
+	scene.background = savedBackground;
+	scene.fog = savedFog;
+	controls.enabled = !renderer.xr.isPresenting;
+	cameraHandsButton.disabled = false;
+	cameraHandsButton.textContent = "Camera hands";
+}
+
+async function startCameraHands() {
+	if (renderer.xr.isPresenting) {
+		showError("End the AR session before starting camera hand tracking.");
+		return;
+	}
+	if (!navigator.mediaDevices?.getUserMedia) {
+		showError("Camera access requires a secure HTTPS connection and a browser with getUserMedia support.");
+		return;
+	}
+
+	cameraHandsButton.disabled = true;
+	cameraHandsButton.textContent = "Starting…";
+	clearError();
+	setStatus("Requesting camera access");
+	try {
+		cameraHandStream = await navigator.mediaDevices.getUserMedia({
+			audio: false,
+			video: {
+				facingMode: { ideal: "user" },
+				width: { ideal: 640 },
+				height: { ideal: 480 },
+				frameRate: { ideal: 24, max: 30 },
+			},
+		});
+		handCameraVideo.srcObject = cameraHandStream;
+		await handCameraVideo.play();
+		document.body.classList.add("camera-hands");
+		controls.enabled = false;
+		scene.background = null;
+		scene.fog = null;
+		ground.visible = false;
+		groundGrid.visible = false;
+		cameraHandStatus.hidden = false;
+		cameraHandStatus.textContent = "Loading hand tracking…";
+		setStatus("Loading hand-tracking model");
+
+		const { FilesetResolver, HandLandmarker } = await import("@mediapipe/tasks-vision");
+		const vision = await FilesetResolver.forVisionTasks(
+			"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.0/wasm",
+		);
+		handLandmarker = await HandLandmarker.createFromOptions(vision, {
+			baseOptions: {
+				modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+			},
+			runningMode: "VIDEO",
+			numHands: 2,
+			minHandDetectionConfidence: 0.55,
+			minHandPresenceConfidence: 0.55,
+			minTrackingConfidence: 0.5,
+		});
+		cameraHandsActive = true;
+		lastCameraDetectionAt = 0;
+		cameraHandsButton.disabled = false;
+		cameraHandsButton.textContent = "Stop camera";
+		cameraHandStatus.textContent = "Show your hand to the front camera.";
+		setStatus("Camera hand tracking ready");
+	} catch (error) {
+		console.error("Could not start camera hand tracking:", error);
+		stopCameraHands();
+		const message = error instanceof DOMException && error.name === "NotAllowedError"
+			? "Camera permission was denied. Allow camera access in your browser settings, then try again."
+			: error instanceof Error
+				? error.message
+				: "Could not start camera hand tracking.";
+		showError(message);
+		setStatus("Camera hand tracking unavailable");
+	}
+}
+
+cameraHandsButton.addEventListener("click", () => {
+	if (cameraHandsActive) {
+		stopCameraHands();
+		setStatus("Camera hand tracking stopped");
+		return;
+	}
+	startCameraHands();
+});
+window.addEventListener("pagehide", stopCameraHands);
 
 const xrButton = document.createElement("button");
 xrButton.type = "button";
@@ -807,13 +741,14 @@ xrButton.addEventListener("click", async () => {
 		await arSession.end();
 		return;
 	}
+	if (cameraHandsActive || cameraHandStream) stopCameraHands();
 	clearError();
 	try {
 		if (!navigator.xr || !(await navigator.xr.isSessionSupported("immersive-ar"))) {
 			throw new Error("Immersive AR is not available in this browser. Try Chrome on an ARCore-supported device.");
 		}
 		const session = await navigator.xr.requestSession("immersive-ar", {
-			optionalFeatures: ["hit-test", "local-floor", "dom-overlay", "hand-tracking"],
+			optionalFeatures: ["hit-test", "local-floor", "dom-overlay"],
 			domOverlay: { root: document.body },
 		});
 		arSession = session;
@@ -827,8 +762,6 @@ xrButton.addEventListener("click", async () => {
 document.querySelector("#xr-button-container").append(xrButton);
 renderer.xr.addEventListener("sessionstart", async () => {
 	controls.enabled = false;
-	handTrackingStartedAt = null;
-	lastHandTrackingMessage = "";
 	document.documentElement.classList.add("xr-ar");
 	document.body.classList.add("xr-ar");
 	scene.background = null;
@@ -842,11 +775,10 @@ renderer.xr.addEventListener("sessionstart", async () => {
 	arSurfaceFound = false;
 	arFallbackPlacementReady = false;
 	arPlacementMode = "searching";
-	handTrackingStartedAt = performance.now();
-	handTrackingStatus.textContent = "Hand tracking: checking...";
+	arPlacementStartedAt = performance.now();
 	placementReticle.visible = false;
 	arPlaceButton.textContent = "Place clay";
-	arInstructions.textContent = "Scanning for a surface. Hand tracking will appear here if supported by your browser.";
+	arInstructions.textContent = "Scanning for a surface.";
 	updateARPlacementAvailability(false);
 	setStatus("Scanning for a surface");
 	canvasHelp.classList.add("is-hidden");
@@ -864,8 +796,7 @@ renderer.xr.addEventListener("sessionend", () => {
 	hitTestSource = null;
 	hitTestReferenceSpace = null;
 	arSession = null;
-	handTrackingStartedAt = null;
-	lastHandTrackingMessage = "";
+	arPlacementStartedAt = null;
 	arSurfaceFound = false;
 	arFallbackPlacementReady = false;
 	arPlacementMode = "searching";
@@ -893,6 +824,10 @@ function resizeRenderer() {
 	renderer.setSize(width, height, false);
 	camera.aspect = width / height;
 	camera.updateProjectionMatrix();
+	const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+	handCameraLandmarks.width = Math.round(width * pixelRatio);
+	handCameraLandmarks.height = Math.round(height * pixelRatio);
+	handCameraContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
 }
 
 const resizeObserver = new ResizeObserver(resizeRenderer);
@@ -922,11 +857,11 @@ renderer.setAnimationLoop((time) => {
 		renderer.xr.isPresenting &&
 		!clayPlacedInAR &&
 		!arSurfaceFound &&
-		handTrackingStartedAt !== null &&
-		performance.now() - handTrackingStartedAt > 4000
+		arPlacementStartedAt !== null &&
+		performance.now() - arPlacementStartedAt > 4000
 	) {
 		updateARPlacementAvailability(false, true);
 	}
-	updateHands(time);
+	updateCameraHandTracking(time);
 	renderer.render(scene, camera);
 });
