@@ -1,12 +1,100 @@
 <!doctype html>
 <html lang="en">
-<head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Hello World</title>
-</head>
-<body>
-	<h1>Hello World</h1>
-</body>
-</html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta name="theme-color" content="#11131a">
+		<meta name="description" content="A small, hands-on clay sculpting studio for the web.">
+		<title>Clay Studio — WebXR Sculpting</title>
+	</head>
+	<body>
+		<div class="app-shell">
+			<aside class="sidebar">
+				<a class="brand" href="#" aria-label="Clay Studio home">
+					<span class="brand-mark" aria-hidden="true">C</span>
+					<span>clay<span class="brand-light">studio</span></span>
+				</a>
 
+				<div class="sidebar-content">
+					<div class="eyebrow">YOUR WORKSPACE</div>
+					<section class="project-card" aria-label="Current project">
+						<div class="project-preview" aria-hidden="true"><span></span></div>
+						<div>
+							<div class="project-name">Untitled form</div>
+							<div class="project-meta">Unsaved project</div>
+						</div>
+						<span class="live-dot" aria-label="Ready"></span>
+					</section>
+
+					<div class="section-heading">
+						<span class="eyebrow">TOOLS</span>
+						<span class="shortcut">1—2</span>
+					</div>
+					<div class="tool-list" role="group" aria-label="Sculpting tool">
+						<button class="tool-button is-active" data-mode="raise" aria-pressed="true" title="Raise clay (1)">
+							<span class="tool-icon" aria-hidden="true">↗</span>
+							<span><strong>Raise</strong><small>Add volume to the surface</small></span>
+							<kbd>1</kbd>
+						</button>
+						<button class="tool-button" data-mode="lower" aria-pressed="false" title="Lower clay (2)">
+							<span class="tool-icon lower-icon" aria-hidden="true">↙</span>
+							<span><strong>Lower</strong><small>Push into the surface</small></span>
+							<kbd>2</kbd>
+						</button>
+					</div>
+
+					<div class="section-heading settings-heading"><span class="eyebrow">BRUSH SETTINGS</span></div>
+					<label class="slider-label" for="brush-size">
+						<span>Radius</span><output id="radius-value" for="brush-size">0.22</output>
+					</label>
+					<input id="brush-size" class="range" type="range" min="0.08" max="0.55" step="0.01" value="0.22">
+					<div class="range-ends"><span>Fine</span><span>Broad</span></div>
+
+					<label class="slider-label strength-label" for="brush-strength">
+						<span>Strength</span><output id="strength-value" for="brush-strength">0.045</output>
+					</label>
+					<input id="brush-strength" class="range" type="range" min="0.01" max="0.12" step="0.005" value="0.045">
+					<div class="range-ends"><span>Gentle</span><span>Bold</span></div>
+
+					<div class="sidebar-divider"></div>
+					<div class="section-heading"><span class="eyebrow">SCULPT</span></div>
+					<div class="action-list">
+						<button class="action-button" id="reset-button"><span aria-hidden="true">⟲</span>Reset shape</button>
+						<button class="action-button" id="import-button"><span aria-hidden="true">＋</span>Import model <kbd>⌘O</kbd></button>
+						<input id="model-file" type="file" accept=".stl,.obj,.3mf" hidden>
+					</div>
+				</div>
+
+				<div class="sidebar-footer">
+					<div class="keyboard-hint"><span class="hint-key">Drag</span><span>to sculpt</span></div>
+					<div class="keyboard-hint"><span class="hint-key">⌥ Drag</span><span>to orbit</span></div>
+				</div>
+			</aside>
+
+			<main class="studio">
+				<header class="topbar">
+					<div class="breadcrumb"><span>Workspace</span><span class="crumb-slash">/</span><strong>Untitled form</strong></div>
+					<div class="topbar-actions">
+						<span class="connection-status"><span class="status-dot"></span><span id="status-message">Ready to sculpt</span></span>
+						<div id="xr-button-container"></div>
+					</div>
+				</header>
+				<section class="viewport" aria-label="3D sculpting canvas">
+					<div class="viewport-glow" aria-hidden="true"></div>
+					<div class="viewport-caption"><span class="caption-dot"></span><span id="model-label">CLAY FORM</span></div>
+					<div class="canvas-help" id="canvas-help">
+						<span class="help-icon" aria-hidden="true">✦</span>
+						<span><strong>Shape it your way</strong><small>Click and drag across the clay to sculpt</small></span>
+					</div>
+					<div class="viewport-footer"><span>WEBGL · INTERACTIVE</span><span id="mesh-info">CLAY FORM · 12,096 FACES</span></div>
+					<div id="error-message" class="error-message" role="alert" hidden></div>
+				</section>
+				<footer class="bottom-bar">
+					<span><span class="bottom-indicator"></span>LOCAL SESSION</span>
+					<span>Changes are kept in this session</span>
+				</footer>
+			</main>
+		</div>
+		<script type="module" src="./src/main.js"></script>
+	</body>
+</html>
