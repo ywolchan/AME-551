@@ -663,10 +663,10 @@ function updateCameraHandsButtons(isStarting) {
 		button.textContent = isStarting
 			? "Starting camera…"
 			: cameraHandsActive
-				? "Stop camera"
+				? "Stop rear camera"
 				: renderer.xr.isPresenting && button === arCameraHandsButton
-					? "Exit AR for Camera hands"
-					: "Camera hands";
+					? "Exit AR · Rear camera hands"
+					: "Rear camera hands";
 		button.classList.toggle("is-active", cameraHandsActive);
 	}
 }
@@ -687,17 +687,29 @@ async function startCameraHands() {
 	cameraHandStatus.textContent = "Requesting rear-camera access for hand tracking…";
 	setStatus("Requesting camera access");
 	try {
+		const videoDevices = await navigator.mediaDevices.enumerateDevices();
+		const rearCamera = videoDevices.find((device) =>
+			device.kind === "videoinput" && /back|rear|environment|world/i.test(device.label),
+		);
+		const videoConstraints = {
+			facingMode: { exact: "environment" },
+			width: { ideal: 640 },
+			height: { ideal: 480 },
+			frameRate: { ideal: 24, max: 30 },
+		};
+		if (rearCamera) videoConstraints.deviceId = { exact: rearCamera.deviceId };
+
 		cameraHandStream = await navigator.mediaDevices.getUserMedia({
 			audio: false,
-			video: {
-				facingMode: { exact: "environment" },
-				width: { ideal: 640 },
-				height: { ideal: 480 },
-				frameRate: { ideal: 24, max: 30 },
-			},
+			video: videoConstraints,
 		});
 		const cameraTrack = cameraHandStream.getVideoTracks()[0];
-		if (!cameraTrack || cameraTrack.getSettings().facingMode !== "environment") {
+		const cameraSettings = cameraTrack?.getSettings();
+		const trackLabel = cameraTrack?.label ?? "";
+		const isFrontCamera = /front|user[- ]facing|facetime|selfie/i.test(trackLabel);
+		const isRearCamera = cameraSettings?.facingMode === "environment" ||
+			(Boolean(rearCamera) && cameraSettings?.deviceId === rearCamera.deviceId);
+		if (!cameraTrack || isFrontCamera || !isRearCamera) {
 			throw new Error("The browser could not confirm the rear camera. Camera hands stopped; front-camera fallback is disabled.");
 		}
 		handCameraVideo.srcObject = cameraHandStream;
@@ -728,7 +740,7 @@ async function startCameraHands() {
 		cameraHandsActive = true;
 		lastCameraDetectionAt = 0;
 		updateCameraHandsButtons(false);
-		cameraHandStatus.textContent = "Show your hand to the rear camera.";
+		cameraHandStatus.textContent = `Rear camera ready${trackLabel ? `: ${trackLabel}` : ""}. Show your hand.`;
 		setStatus("Rear-camera hand tracking ready");
 	} catch (error) {
 		console.error("Could not start camera hand tracking:", error);
