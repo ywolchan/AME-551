@@ -523,6 +523,33 @@ body.xr-ar .ar-overlay {
 	text-shadow: 0 1px 5px #0008;
 }
 
+.ar-camera-hands-button {
+	min-height: 44px;
+	padding: 0 18px;
+	border: 1px solid #ffffff5c;
+	border-radius: 999px;
+	background: #171920e8;
+	color: #a9f7ff;
+	font-size: 13px;
+	font-weight: 600;
+	pointer-events: auto;
+	touch-action: manipulation;
+}
+
+.ar-camera-hands-button:hover {
+	background: #252a33;
+}
+
+.ar-camera-hands-button:disabled {
+	cursor: wait;
+	opacity: 0.65;
+}
+
+.ar-camera-hands-button.is-active {
+	border-color: #39efff;
+	background: #10272a;
+}
+
 .ar-place-button {
 	min-height: 48px;
 	padding: 0 24px;
@@ -750,6 +777,15 @@ body.xr-ar .ar-overlay {
 body.camera-hands .hand-camera-feed,
 body.camera-hands .hand-camera-landmarks {
 	display: block;
+}
+
+body.xr-ar.camera-hands .hand-camera-feed {
+	display: none;
+}
+
+body.xr-ar.camera-hands .camera-hand-status {
+	top: max(20px, env(safe-area-inset-top));
+	bottom: auto;
 }
 
 body.camera-hands .viewport::before,

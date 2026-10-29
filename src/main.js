@@ -16,6 +16,8 @@ const strengthInput = document.querySelector("#brush-strength");
 const arInstructions = document.querySelector("#ar-instructions");
 const arPlaceButton = document.querySelector("#ar-place-button");
 const cameraHandsButton = document.querySelector("#camera-hands-button");
+const arCameraHandsButton = document.querySelector("#ar-camera-hands-button");
+const cameraHandsButtons = [cameraHandsButton, arCameraHandsButton];
 const handCameraVideo = document.querySelector("#hand-camera-feed");
 const handCameraLandmarks = document.querySelector("#hand-camera-landmarks");
 const cameraHandStatus = document.querySelector("#camera-hand-status");
@@ -594,6 +596,11 @@ function updateCameraHandTracking(time) {
 			cameraHandStatus.textContent = "Show your hand to the front camera.";
 			return;
 		}
+		if (renderer.xr.isPresenting && !clayPlacedInAR) {
+			brushIndicator.visible = false;
+			cameraHandStatus.textContent = "Place the clay before sculpting with camera hands.";
+			return;
+		}
 
 		const landmarks = detectedHands[0];
 		const thumbTip = landmarks[4];
@@ -645,28 +652,41 @@ function stopCameraHands() {
 	document.body.classList.remove("camera-hands");
 	cameraHandStatus.hidden = true;
 	brushIndicator.visible = false;
-	ground.visible = true;
-	groundGrid.visible = true;
-	scene.background = savedBackground;
-	scene.fog = savedFog;
+	if (!renderer.xr.isPresenting) {
+		ground.visible = true;
+		groundGrid.visible = true;
+		scene.background = savedBackground;
+		scene.fog = savedFog;
+	}
 	controls.enabled = !renderer.xr.isPresenting;
-	cameraHandsButton.disabled = false;
-	cameraHandsButton.textContent = "Camera hands";
+	updateCameraHandsButtons(false);
+}
+
+function updateCameraHandsButtons(isStarting) {
+	for (const button of cameraHandsButtons) {
+		button.disabled = isStarting;
+		button.textContent = isStarting
+			? "Starting camera…"
+			: cameraHandsActive
+				? "Stop camera"
+				: "Camera hands";
+		button.classList.toggle("is-active", cameraHandsActive);
+	}
 }
 
 async function startCameraHands() {
-	if (renderer.xr.isPresenting) {
-		showError("End the AR session before starting camera hand tracking.");
-		return;
-	}
 	if (!navigator.mediaDevices?.getUserMedia) {
 		showError("Camera access requires a secure HTTPS connection and a browser with getUserMedia support.");
 		return;
 	}
 
-	cameraHandsButton.disabled = true;
-	cameraHandsButton.textContent = "Starting…";
+	const inAR = renderer.xr.isPresenting;
+	updateCameraHandsButtons(true);
 	clearError();
+	cameraHandStatus.hidden = false;
+	cameraHandStatus.textContent = inAR
+		? "Requesting front-camera access for hand tracking…"
+		: "Requesting camera access…";
 	setStatus("Requesting camera access");
 	try {
 		cameraHandStream = await navigator.mediaDevices.getUserMedia({
@@ -681,12 +701,13 @@ async function startCameraHands() {
 		handCameraVideo.srcObject = cameraHandStream;
 		await handCameraVideo.play();
 		document.body.classList.add("camera-hands");
-		controls.enabled = false;
-		scene.background = null;
-		scene.fog = null;
-		ground.visible = false;
-		groundGrid.visible = false;
-		cameraHandStatus.hidden = false;
+		if (!inAR) {
+			controls.enabled = false;
+			scene.background = null;
+			scene.fog = null;
+			ground.visible = false;
+			groundGrid.visible = false;
+		}
 		cameraHandStatus.textContent = "Loading hand tracking…";
 		setStatus("Loading hand-tracking model");
 
@@ -706,31 +727,40 @@ async function startCameraHands() {
 		});
 		cameraHandsActive = true;
 		lastCameraDetectionAt = 0;
-		cameraHandsButton.disabled = false;
-		cameraHandsButton.textContent = "Stop camera";
-		cameraHandStatus.textContent = "Show your hand to the front camera.";
-		setStatus("Camera hand tracking ready");
+		updateCameraHandsButtons(false);
+		cameraHandStatus.textContent = inAR
+			? clayPlacedInAR
+				? "Camera hand tracking ready. Pinch over the clay to sculpt."
+				: "Camera hand tracking ready. Place the clay, then pinch to sculpt."
+			: "Show your hand to the front camera.";
+		setStatus(inAR ? "Camera hand tracking ready in AR" : "Camera hand tracking ready");
 	} catch (error) {
 		console.error("Could not start camera hand tracking:", error);
 		stopCameraHands();
 		const message = error instanceof DOMException && error.name === "NotAllowedError"
 			? "Camera permission was denied. Allow camera access in your browser settings, then try again."
-			: error instanceof Error
-				? error.message
-				: "Could not start camera hand tracking.";
+			: error instanceof DOMException && ["NotReadableError", "AbortError"].includes(error.name)
+				? "The front camera could not start. This phone may not allow camera hand tracking while AR is using the camera; end AR or close other camera apps and try again."
+				: error instanceof Error
+					? error.message
+					: "Could not start camera hand tracking.";
 		showError(message);
 		setStatus("Camera hand tracking unavailable");
 	}
 }
 
-cameraHandsButton.addEventListener("click", () => {
+function toggleCameraHands() {
 	if (cameraHandsActive) {
 		stopCameraHands();
 		setStatus("Camera hand tracking stopped");
 		return;
 	}
 	startCameraHands();
-});
+}
+
+for (const button of cameraHandsButtons) {
+	button.addEventListener("click", toggleCameraHands);
+}
 window.addEventListener("pagehide", stopCameraHands);
 
 const xrButton = document.createElement("button");
@@ -778,7 +808,7 @@ renderer.xr.addEventListener("sessionstart", async () => {
 	arPlacementStartedAt = performance.now();
 	placementReticle.visible = false;
 	arPlaceButton.textContent = "Place clay";
-	arInstructions.textContent = "Scanning for a surface.";
+	arInstructions.textContent = "Scanning for a surface. Camera hands is available here in AR.";
 	updateARPlacementAvailability(false);
 	setStatus("Scanning for a surface");
 	canvasHelp.classList.add("is-hidden");
@@ -800,15 +830,16 @@ renderer.xr.addEventListener("sessionend", () => {
 	arSurfaceFound = false;
 	arFallbackPlacementReady = false;
 	arPlacementMode = "searching";
-	controls.enabled = true;
+	const keepCameraHands = cameraHandsActive || cameraHandStream !== null;
+	controls.enabled = !keepCameraHands;
 	document.documentElement.classList.remove("xr-ar");
 	document.body.classList.remove("xr-ar");
-	scene.background = savedBackground;
-	scene.fog = savedFog;
+	scene.background = keepCameraHands ? null : savedBackground;
+	scene.fog = keepCameraHands ? null : savedFog;
 	renderer.setClearColor(0x000000, 0);
 	renderer.setClearAlpha(0);
-	ground.visible = true;
-	groundGrid.visible = true;
+	ground.visible = !keepCameraHands;
+	groundGrid.visible = !keepCameraHands;
 	sculptRoot.visible = true;
 	sculptRoot.position.set(0, 0, 0);
 	sculptRoot.quaternion.identity();

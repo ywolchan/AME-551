@@ -21,6 +21,6 @@ The `main` branch deploys to [GitHub Pages](https://ywolchan.github.io/AME-551/)
 - Choose Raise or Lower, then adjust brush radius and strength in the sidebar.
 - Use Reset shape to restore the current model, or import an `.stl`, `.obj`, or `.3mf` file.
 - On a supported mobile browser, choose Place in AR and move the phone until the surface reticle appears, then tap Place clay. If surface detection does not find a surface after a few seconds, use Place clay ahead to put it in front of you.
-- Choose Camera hands and allow camera access to sculpt with hand tracking. MediaPipe tracks your index finger and thumb; pinch over the clay to sculpt with the selected tool. Camera frames are processed on-device and are not uploaded. The tracking model and runtime are downloaded from MediaPipe's public CDNs the first time.
+- Choose Camera hands and allow camera access to sculpt with hand tracking. MediaPipe tracks your index finger and thumb; pinch over the clay to sculpt with the selected tool. Camera hands is also available from the AR overlay after entering AR. Some phones may not allow the front camera to run at the same time as AR; if so, end AR or close other camera apps and try again. Camera frames are processed on-device and are not uploaded. The tracking model and runtime are downloaded from MediaPipe's public CDNs the first time.
 
 Run `npm run build` to create the production bundle.
