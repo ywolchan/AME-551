@@ -122,6 +122,8 @@ let hitTestSource = null;
 let hitTestReferenceSpace = null;
 let arSession = null;
 let arSurfaceFound = false;
+let arFallbackPlacementReady = false;
+let arPlacementMode = "searching";
 let clayPlacedInAR = false;
 let handTrackingStartedAt = null;
 let lastHandTrackingMessage = "";
@@ -454,28 +456,60 @@ document.querySelector("#model-file").addEventListener("change", async (event) =
 	}
 });
 
-function updateARPlacementAvailability(found) {
-	arSurfaceFound = found;
-	arPlaceButton.disabled = !found;
-	if (!clayPlacedInAR) {
-		arInstructions.textContent = found
-			? "Surface found. Tap Place clay or tap the screen."
-			: "Move your phone slowly to find a surface.";
+function updateARPlacementAvailability(found, fallbackReady = false) {
+	const mode = clayPlacedInAR ? "placed" : found ? "surface" : fallbackReady ? "fallback" : "searching";
+	arSurfaceFound = mode === "surface";
+	arFallbackPlacementReady = mode === "fallback";
+	arPlaceButton.disabled = mode !== "surface" && mode !== "fallback";
+	if (mode === arPlacementMode) return;
+	arPlacementMode = mode;
+
+	arPlaceButton.textContent = mode === "surface"
+		? "Place clay"
+		: mode === "fallback"
+			? "Place clay ahead"
+			: mode === "placed"
+				? "Clay placed"
+				: "Scanning...";
+	if (mode !== "placed") {
+		arInstructions.textContent = mode === "surface"
+			? "Surface found. Tap Place clay."
+			: mode === "fallback"
+				? "No surface detected yet. You can place clay about one meter in front of you."
+				: "Move your phone slowly to find a surface.";
 	}
 }
 
 function placeClayAtReticle() {
-	if (!arSurfaceFound || !placementReticle.visible) return;
-	placementReticle.matrix.decompose(worldHit, reticleQuaternion, worldScale);
+	if (arSurfaceFound && placementReticle.visible) {
+		placementReticle.matrix.decompose(worldHit, reticleQuaternion, worldScale);
+	} else if (arFallbackPlacementReady) {
+		const xrCamera = renderer.xr.getCamera(camera);
+		xrCamera.updateWorldMatrix(true, false);
+		xrCamera.getWorldPosition(worldHit);
+		xrCamera.getWorldQuaternion(reticleQuaternion);
+		worldNormal.set(0, 0, -1).applyQuaternion(reticleQuaternion);
+		worldNormal.y = 0;
+		if (worldNormal.lengthSq() < 0.000001) worldNormal.set(0, 0, -1);
+		worldNormal.normalize();
+		worldHit.addScaledVector(worldNormal, 1);
+		worldHit.y = Math.max(0.35, worldHit.y - 0.85);
+		reticleQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(-worldNormal.x, -worldNormal.z));
+	} else {
+		return;
+	}
+
 	sculptRoot.quaternion.copy(reticleQuaternion);
 	sculptRoot.scale.setScalar(0.28);
-	worldNormal.set(0, 1, 0).applyQuaternion(reticleQuaternion).normalize();
-	sculptRoot.position.copy(worldHit).addScaledVector(worldNormal, 0.82 * 0.28);
+	if (arSurfaceFound && placementReticle.visible) {
+		worldNormal.set(0, 1, 0).applyQuaternion(reticleQuaternion).normalize();
+		worldHit.addScaledVector(worldNormal, 0.82 * 0.28);
+	}
+	sculptRoot.position.copy(worldHit);
 	sculptRoot.visible = true;
 	clayPlacedInAR = true;
-	arInstructions.textContent = "Tap the clay to sculpt, or touch it with a fingertip, pinch, then pull to stretch.";
-	arPlaceButton.textContent = "Clay placed";
-	arPlaceButton.disabled = true;
+	updateARPlacementAvailability(false);
+	arInstructions.textContent = "Clay placed. Tap it to sculpt, or touch it with a fingertip, pinch, then pull.";
 	setStatus("Clay placed in AR");
 }
 
@@ -779,8 +813,7 @@ xrButton.addEventListener("click", async () => {
 			throw new Error("Immersive AR is not available in this browser. Try Chrome on an ARCore-supported device.");
 		}
 		const session = await navigator.xr.requestSession("immersive-ar", {
-			requiredFeatures: ["hit-test"],
-			optionalFeatures: ["local-floor", "dom-overlay", "hand-tracking"],
+			optionalFeatures: ["hit-test", "local-floor", "dom-overlay", "hand-tracking"],
 			domOverlay: { root: document.body },
 		});
 		arSession = session;
@@ -806,6 +839,9 @@ renderer.xr.addEventListener("sessionstart", async () => {
 	groundGrid.visible = false;
 	sculptRoot.visible = false;
 	clayPlacedInAR = false;
+	arSurfaceFound = false;
+	arFallbackPlacementReady = false;
+	arPlacementMode = "searching";
 	handTrackingStartedAt = performance.now();
 	handTrackingStatus.textContent = "Hand tracking: checking...";
 	placementReticle.visible = false;
@@ -830,6 +866,9 @@ renderer.xr.addEventListener("sessionend", () => {
 	arSession = null;
 	handTrackingStartedAt = null;
 	lastHandTrackingMessage = "";
+	arSurfaceFound = false;
+	arFallbackPlacementReady = false;
+	arPlacementMode = "searching";
 	controls.enabled = true;
 	document.documentElement.classList.remove("xr-ar");
 	document.body.classList.remove("xr-ar");
@@ -878,6 +917,15 @@ renderer.setAnimationLoop((time) => {
 			placementReticle.visible = false;
 			updateARPlacementAvailability(false);
 		}
+	}
+	if (
+		renderer.xr.isPresenting &&
+		!clayPlacedInAR &&
+		!arSurfaceFound &&
+		handTrackingStartedAt !== null &&
+		performance.now() - handTrackingStartedAt > 4000
+	) {
+		updateARPlacementAvailability(false, true);
 	}
 	updateHands(time);
 	renderer.render(scene, camera);
