@@ -4,8 +4,8 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
 		<meta name="theme-color" content="#11131a">
-		<meta name="description" content="A small, hands-on clay sculpting studio for the web.">
-		<title>Clay Studio — WebXR Sculpting</title>
+		<meta name="description" content="A hands-on clay sculpting studio with rear-camera AR and MediaPipe hand tracking.">
+		<title>Clay Studio — Camera AR Sculpting</title>
 	</head>
 	<body>
 		<div class="app-shell">
@@ -76,15 +76,14 @@
 					<div class="breadcrumb"><span>Workspace</span><span class="crumb-slash">/</span><strong>Untitled form</strong></div>
 					<div class="topbar-actions">
 						<span class="connection-status"><span class="status-dot"></span><span id="status-message">Ready to sculpt</span></span>
-						<div id="xr-button-container">
-							<button class="camera-hands-button" id="camera-hands-button" type="button">Hands AR</button>
-						</div>
+						<button class="camera-hands-button" id="ar-button" type="button">Place in AR</button>
 					</div>
 				</header>
 				<section class="viewport" aria-label="3D sculpting canvas">
 					<video class="hand-camera-feed" id="hand-camera-feed" aria-hidden="true" autoplay muted playsinline></video>
 					<canvas class="hand-camera-landmarks" id="hand-camera-landmarks" aria-hidden="true"></canvas>
 					<div class="camera-hand-status" id="camera-hand-status" role="status" hidden></div>
+					<button class="camera-place-button" id="camera-place-button" type="button" hidden>Place clay</button>
 					<div class="viewport-glow" aria-hidden="true"></div>
 					<div class="viewport-caption"><span class="caption-dot"></span><span id="model-label">CLAY FORM</span></div>
 					<div class="canvas-help" id="canvas-help">
@@ -99,11 +98,6 @@
 					<span>Changes are kept in this session</span>
 				</footer>
 			</main>
-		</div>
-		<div class="ar-overlay" id="ar-overlay" aria-live="polite">
-			<button class="ar-camera-hands-button" id="ar-camera-hands-button" type="button">Switch to Hands AR</button>
-			<div class="ar-instructions" id="ar-instructions">Move your phone slowly to find a surface.</div>
-			<button class="ar-place-button" id="ar-place-button" type="button" disabled>Place clay</button>
 		</div>
 		<script type="module" src="./src/main.js"></script>
 	</body>

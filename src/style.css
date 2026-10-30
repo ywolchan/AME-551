@@ -405,16 +405,8 @@ kbd {
 	box-shadow: 0 0 7px #81be9470;
 }
 
-#xr-button-container {
-	display: flex;
-	align-items: center;
-	gap: 7px;
-}
-
-#xr-button-container button {
+#ar-button {
 	position: static !important;
-	bottom: auto !important;
-	left: auto !important;
 	transform: none !important;
 	min-height: 33px !important;
 	padding: 0 12px !important;
@@ -429,128 +421,16 @@ kbd {
 	cursor: pointer;
 }
 
-#xr-button-container button:hover {
+#ar-button:hover {
 	background: #362a25 !important;
 }
 
-#xr-button-container .camera-hands-button {
-	min-height: 33px;
-	padding: 0 10px !important;
-	border: 1px solid #393d49 !important;
-	border-radius: 6px;
-	background: #222630 !important;
-	color: #c6c9d4 !important;
-	font-size: 10px !important;
-	font-weight: 600;
-	cursor: pointer;
-}
-
-#xr-button-container .camera-hands-button:hover {
-	background: #2a2f3b !important;
-}
-
-#xr-button-container button:disabled {
+#ar-button:disabled {
 	cursor: wait;
 	opacity: 0.65;
 }
 
-.ar-overlay {
-	display: none;
-}
-
-body.xr-ar .sidebar,
-body.xr-ar .topbar,
-body.xr-ar .bottom-bar {
-	display: none;
-}
-
-body.xr-ar .studio {
-	position: fixed;
-	inset: 0;
-	display: block;
-	min-height: 100dvh;
-}
-
-body.xr-ar .viewport {
-	position: fixed;
-	inset: 0;
-	z-index: 5;
-	width: 100%;
-	height: 100dvh;
-	background: transparent;
-}
-
-html.xr-ar,
-html.xr-ar body {
-	background: transparent !important;
-}
-
-body.xr-ar .viewport::before,
-body.xr-ar .viewport-glow,
-body.xr-ar .viewport-caption,
-body.xr-ar .canvas-help,
-body.xr-ar .viewport-footer {
-	display: none;
-}
-
-body.xr-ar .viewport canvas {
-	z-index: 0;
-	background: transparent;
-}
-
-body.xr-ar .ar-overlay {
-	position: fixed;
-	z-index: 10;
-	right: 18px;
-	bottom: max(24px, env(safe-area-inset-bottom));
-	left: 18px;
-	display: flex;
-	align-items: center;
-	flex-direction: column;
-	gap: 12px;
-	pointer-events: none;
-}
-
-.ar-instructions {
-	max-width: 380px;
-	padding: 11px 16px;
-	border: 1px solid #ffffff30;
-	border-radius: 999px;
-	background: #171920d9;
-	color: #f3f1ef;
-	font-size: 13px;
-	text-align: center;
-	text-shadow: 0 1px 5px #0008;
-}
-
-.ar-camera-hands-button {
-	min-height: 44px;
-	padding: 0 18px;
-	border: 1px solid #ffffff5c;
-	border-radius: 999px;
-	background: #171920e8;
-	color: #a9f7ff;
-	font-size: 13px;
-	font-weight: 600;
-	pointer-events: auto;
-	touch-action: manipulation;
-}
-
-.ar-camera-hands-button:hover {
-	background: #252a33;
-}
-
-.ar-camera-hands-button:disabled {
-	cursor: wait;
-	opacity: 0.65;
-}
-
-.ar-camera-hands-button.is-active {
-	border-color: #39efff;
-	background: #10272a;
-}
-
-.ar-place-button {
+.camera-place-button {
 	min-height: 48px;
 	padding: 0 24px;
 	border: 1px solid #f5b397;
@@ -564,11 +444,8 @@ body.xr-ar .ar-overlay {
 	touch-action: manipulation;
 }
 
-.ar-place-button:disabled {
-	border-color: #ffffff2b;
-	background: #55545c;
-	color: #c6c4ca;
-	opacity: 0.8;
+.camera-place-button[hidden] {
+	display: none;
 }
 
 .viewport {
@@ -757,7 +634,7 @@ body.xr-ar .ar-overlay {
 	position: absolute;
 	z-index: 3;
 	right: 16px;
-	bottom: 54px;
+	bottom: max(82px, calc(env(safe-area-inset-bottom) + 70px));
 	left: 16px;
 	width: fit-content;
 	max-width: calc(100% - 32px);
@@ -771,6 +648,76 @@ body.xr-ar .ar-overlay {
 	line-height: 1.4;
 	text-align: center;
 	pointer-events: none;
+}
+
+body.camera-hands .sidebar,
+body.camera-hands .bottom-bar {
+	display: none;
+}
+
+body.camera-hands .studio {
+	position: fixed;
+	inset: 0;
+	display: block;
+	min-height: 100dvh;
+}
+
+body.camera-hands .viewport {
+	position: fixed;
+	inset: 0;
+	z-index: 5;
+	width: 100%;
+	height: 100dvh;
+	background: transparent;
+}
+
+body.camera-hands .topbar {
+	position: fixed;
+	z-index: 8;
+	inset: 0 0 auto;
+	display: block;
+	height: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	pointer-events: none;
+}
+
+body.camera-hands .breadcrumb,
+body.camera-hands .connection-status {
+	display: none;
+}
+
+body.camera-hands .topbar-actions {
+	position: static;
+}
+
+body.camera-hands #ar-button {
+	position: fixed !important;
+	z-index: 9;
+	top: max(16px, env(safe-area-inset-top));
+	right: 16px;
+	min-height: 44px !important;
+	border-color: #ffffff5c !important;
+	border-radius: 999px !important;
+	background: #171920e8 !important;
+	color: #a9f7ff !important;
+	font-size: 13px !important;
+	pointer-events: auto;
+	touch-action: manipulation;
+}
+
+body.camera-hands #ar-button.is-active {
+	border-color: #39efff !important;
+	background: #10272a !important;
+}
+
+body.camera-hands .camera-place-button {
+	position: fixed;
+	z-index: 4;
+	bottom: max(20px, env(safe-area-inset-bottom));
+	left: 50%;
+	transform: translateX(-50%);
 }
 
 body.camera-hands .hand-camera-feed,
@@ -823,7 +770,7 @@ body.camera-hands .viewport {
 		justify-content: flex-end;
 	}
 
-	#xr-button-container button {
+	#ar-button {
 		min-height: 32px !important;
 		padding-right: 9px !important;
 		padding-left: 9px !important;
