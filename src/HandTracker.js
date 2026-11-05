@@ -43,14 +43,30 @@ export class HandTracker {
 		this.visionTasks = await import("@mediapipe/tasks-vision");
 		const { FilesetResolver, HandLandmarker } = this.visionTasks;
 		const vision = await FilesetResolver.forVisionTasks(WASM_URL);
-		this.landmarker = await HandLandmarker.createFromOptions(vision, {
+		const options = {
 			baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
 			runningMode: "VIDEO",
 			numHands: 2,
 			minHandDetectionConfidence: 0.55,
 			minHandPresenceConfidence: 0.55,
 			minTrackingConfidence: 0.5,
-		});
+		};
+		try {
+			this.landmarker = await HandLandmarker.createFromOptions(vision, options);
+			this.delegate = "GPU";
+		} catch (gpuError) {
+			console.warn("MediaPipe GPU delegate failed; retrying with CPU.", gpuError);
+			options.baseOptions.delegate = "CPU";
+			try {
+				this.landmarker = await HandLandmarker.createFromOptions(vision, options);
+				this.delegate = "CPU";
+			} catch (cpuError) {
+				throw new Error(
+					`MediaPipe hand tracking failed with both GPU and CPU delegates. GPU: ${gpuError instanceof Error ? gpuError.message : String(gpuError)} CPU: ${cpuError instanceof Error ? cpuError.message : String(cpuError)}`,
+					{ cause: cpuError },
+				);
+			}
+		}
 	}
 
 	setDepthCalibration(value) {
@@ -102,6 +118,7 @@ export class HandTracker {
 	close() {
 		this.landmarker?.close();
 		this.landmarker = null;
+		this.delegate = null;
 		this.visionTasks = null;
 		this.hands = [];
 		this.hasPreviousPinch = false;
