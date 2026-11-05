@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta name="theme-color" content="#11131a">
+		<meta name="description" content="A hands-on clay sculpting studio with rear-camera AR and MediaPipe hand tracking.">
+		<title>Clay Studio — Camera AR Sculpting</title>
+		<link rel="stylesheet" href="./style.css">
+		<script type="importmap">
+		{
+			"imports": {
+				"three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+				"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+				"@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.0/vision_bundle.mjs"
+			}
+		}
+		</script>
+	</head>
+	<body>
+		<div class="app-shell" id="ui-overlay">
+			<aside class="sidebar">
+				<a class="brand" href="#" aria-label="Clay Studio home">
+					<span class="brand-mark" aria-hidden="true">C</span>
+					<span>clay<span class="brand-light">studio</span></span>
+				</a>
+
+				<div class="sidebar-content">
+					<div class="eyebrow">YOUR WORKSPACE</div>
+					<section class="project-card" aria-label="Current project">
+						<div class="project-preview" aria-hidden="true"><span></span></div>
+						<div>
+							<div class="project-name">Untitled form</div>
+							<div class="project-meta">Unsaved project</div>
+						</div>
+						<span class="live-dot" aria-label="Ready"></span>
+					</section>
+
+					<div class="section-heading">
+						<span class="eyebrow">TOOLS</span>
+						<span class="shortcut">1—2</span>
+					</div>
+					<div class="tool-list" role="group" aria-label="Sculpting tool">
+						<button class="tool-button is-active" data-mode="raise" aria-pressed="true" title="Raise clay (1)">
+							<span class="tool-icon" aria-hidden="true">↗</span>
+							<span><strong>Raise</strong><small>Add volume to the surface</small></span>
+							<kbd>1</kbd>
+						</button>
+						<button class="tool-button" data-mode="lower" aria-pressed="false" title="Lower clay (2)">
+							<span class="tool-icon lower-icon" aria-hidden="true">↙</span>
+							<span><strong>Lower</strong><small>Push into the surface</small></span>
+							<kbd>2</kbd>
+						</button>
+					</div>
+					<button class="sculpt-toggle" id="sculpt-toggle" type="button" aria-pressed="true">Sculpt Mode <span>ON</span></button>
+
+					<div class="section-heading settings-heading"><span class="eyebrow">BRUSH SETTINGS</span></div>
+					<label class="slider-label" for="brush-size">
+						<span>Radius</span><output id="radius-value" for="brush-size">0.22</output>
+					</label>
+					<input id="brush-size" class="range" type="range" min="0.015" max="0.12" step="0.005" value="0.035">
+					<div class="range-ends"><span>Fine</span><span>Broad</span></div>
+
+					<label class="slider-label strength-label" for="brush-strength">
+						<span>Strength</span><output id="strength-value" for="brush-strength">0.045</output>
+					</label>
+					<input id="brush-strength" class="range" type="range" min="0.003" max="0.04" step="0.001" value="0.012">
+					<div class="range-ends"><span>Gentle</span><span>Bold</span></div>
+					<label class="slider-label strength-label" for="depth-calibration">
+						<span>Hand depth calibration</span><output id="depth-value" for="depth-calibration">1.00×</output>
+					</label>
+					<input id="depth-calibration" class="range" type="range" min="0.5" max="2" step="0.01" value="1">
+					<div class="range-ends"><span>Closer</span><span>Farther</span></div>
+
+					<div class="sidebar-divider"></div>
+					<div class="section-heading"><span class="eyebrow">SCULPT</span></div>
+					<div class="action-list">
+						<button class="action-button" id="reset-button"><span aria-hidden="true">⟲</span>Reset shape</button>
+						<button class="action-button" id="import-button"><span aria-hidden="true">＋</span>Import model <kbd>⌘O</kbd></button>
+						<button class="action-button" id="export-button"><span aria-hidden="true">⇩</span>Export STL</button>
+						<input id="model-file" type="file" accept=".stl,.obj,.3mf" hidden>
+					</div>
+				</div>
+
+				<div class="sidebar-footer">
+					<div class="keyboard-hint"><span class="hint-key">Hand / Drag</span><span>to sculpt</span></div>
+					<div class="keyboard-hint"><span class="hint-key">⌥ Drag</span><span>to orbit</span></div>
+				</div>
+			</aside>
+
+			<main class="studio">
+				<header class="topbar">
+					<div class="breadcrumb"><span>Workspace</span><span class="crumb-slash">/</span><strong>Untitled form</strong></div>
+					<div class="topbar-actions">
+						<span class="connection-status"><span class="status-dot"></span><span id="status-message">Ready to sculpt</span></span>
+						<button class="camera-hands-button" id="desktop-button" type="button">Desktop Mode</button>
+						<button class="camera-hands-button" id="ar-button" type="button">AR Mode</button>
+					</div>
+				</header>
+				<section class="viewport" aria-label="3D sculpting canvas">
+					<video class="hand-camera-feed" id="hand-camera-feed" aria-hidden="true" autoplay muted playsinline></video>
+					<div class="camera-hand-status" id="camera-hand-status" role="status" hidden></div>
+					<button class="camera-place-button" id="camera-place-button" type="button" hidden>Anchor Object in Space</button>
+					<div class="ar-toolbar" id="ar-toolbar" hidden aria-label="AR sculpt controls">
+						<div class="ar-walk-modes" role="group" aria-label="AR walk mode">
+							<button id="walk-view-button" type="button" aria-pressed="false">Walk View</button>
+							<button id="walk-sculpt-button" type="button" aria-pressed="false">Walk Sculpt</button>
+						</div>
+						<button id="recenter-anchor-button" type="button" hidden>Re-Center Anchor Here</button>
+						<button id="launch-native-walk-button" type="button">Launch Native WebXR Walk-Around</button>
+						<button class="ar-sculpt-toggle" id="ar-sculpt-toggle" type="button" aria-pressed="true">Sculpt ON</button>
+						<button class="ar-mode-button" id="ar-mode-button" type="button">Tool: Raise</button>
+						<label>Radius <input id="ar-brush-size" type="range" min="0.015" max="0.12" step="0.005" value="0.035"></label>
+						<label>Strength <input id="ar-brush-strength" type="range" min="0.003" max="0.04" step="0.001" value="0.012"></label>
+						<label>Depth <input id="ar-depth-calibration" type="range" min="0.5" max="2" step="0.01" value="1"></label>
+						<button class="ar-import-button" id="ar-import-button" type="button">Import model</button>
+						<button class="ar-export-button" id="ar-export-button" type="button">Export STL</button>
+					</div>
+					<div class="viewport-glow" aria-hidden="true"></div>
+					<div class="viewport-caption"><span class="caption-dot"></span><span id="model-label">CLAY FORM</span></div>
+					<div class="canvas-help" id="canvas-help">
+						<span class="help-icon" aria-hidden="true">✦</span>
+						<span><strong>Shape it your way</strong><small>Click and drag across the clay to sculpt</small></span>
+					</div>
+					<div class="viewport-footer"><span>WEBGL · INTERACTIVE</span><span id="mesh-info">CLAY FORM · 12,096 FACES</span></div>
+					<div id="error-message" class="error-message" role="alert" hidden></div>
+				</section>
+				<footer class="bottom-bar">
+					<span><span class="bottom-indicator"></span>LOCAL SESSION</span>
+					<span>Changes are kept in this session</span>
+				</footer>
+			</main>
+		</div>
+		<script type="module" src="./main.js"></script>
+	</body>
+</html>
