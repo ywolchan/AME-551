@@ -405,10 +405,10 @@ function updateARButtons(starting = false) {
 	document.body.dataset.arMode = arActive ? arSessionMode ?? "" : "";
 	arButton.disabled = starting;
 	webxrButton.disabled = starting || !nativeXRSupported;
-	arButton.textContent = starting ? "Starting…" : arActive ? "Exit Walk-Around" : "Walk-Around AR";
+	arButton.textContent = starting ? "Starting…" : arActive ? "Exit Walk-Around" : "Passthrough AR + Hands";
 	webxrButton.textContent = starting
 		? "Starting…"
-		: nativeXRSupported ? "Launch Native WebXR Walk-Around" : "Native WebXR unavailable";
+		: nativeXRSupported ? "Native XR 6DoF" : "Native XR unavailable";
 	arButton.classList.toggle("is-active", arActive);
 	webxrButton.classList.toggle("is-active", nativeXRActive);
 	webxrButton.hidden = !navigator.xr && !arActive;
@@ -426,9 +426,9 @@ function updateARButtons(starting = false) {
 	launchNativeWalkButton.hidden = nativeXRActive || !navigator.xr;
 	launchNativeWalkButton.disabled = starting || !nativeXRSupported;
 	launchNativeWalkButton.textContent = nativeXRSupported
-		? "Launch Native WebXR Walk-Around"
-		: "Native WebXR unavailable";
-	launchNativeWalkButton.title = nativeXRSupportMessage;
+		? "Native XR 6DoF · camera hands may be unavailable"
+		: "Native XR unavailable";
+	launchNativeWalkButton.title = `${nativeXRSupportMessage} WebXR may reserve the rear camera, disabling MediaPipe hand tracking.`;
 	document.body.classList.toggle("camera-hands", arActive);
 	document.body.classList.toggle("native-xr", arActive && nativeXRActive);
 }
@@ -489,10 +489,13 @@ async function startAR(useWebXR = false) {
 			cameraStatus.textContent = "Loading MediaPipe hand tracking…";
 			try {
 				await handTracker.initialize();
+				cameraStatus.textContent = handTracker.delegate === "CPU"
+					? "MediaPipe ready (CPU fallback). Anchor the model, then choose Walk Sculpt to see hands."
+					: "MediaPipe ready. Anchor the model, then choose Walk Sculpt to see hands.";
 			} catch (error) {
 				console.error("MediaPipe hand tracking could not initialize:", error);
 				handTrackingUnavailable = true;
-				showError("AR walk view is available, but MediaPipe hand tracking could not be initialized.");
+				showError(`AR Walk View is available, but hand tracking could not initialize. ${error instanceof Error ? error.message : ""}`);
 			}
 		}
 		arActive = true;
@@ -507,11 +510,11 @@ async function startAR(useWebXR = false) {
 		scene.fog = null;
 		cameraStatus.textContent = useWebXR
 			? directCameraUnavailable
-				? "Native WebXR ready. Direct camera access is unavailable; hand sculpting is disabled."
-				: "Native WebXR ready. Aim at a surface, then anchor the object."
-			: spatialTracker.sensorWarning || "Rear camera ready. Move the phone to position the reticle.";
+				? "Native XR is for 6DoF inspection. It has reserved the camera, so hand skeletons and sculpting are unavailable. Use Passthrough AR + Hands for sculpting."
+				: "Native XR ready. Aim at a surface, then anchor. After placement, choose Walk Sculpt if direct camera access is available."
+			: spatialTracker.sensorWarning || "Passthrough AR ready. Move the phone to position the reticle.";
 		if (!useWebXR && handTrackingUnavailable) {
-			cameraStatus.textContent = "Rear camera ready. Walk View works; MediaPipe hand sculpting is unavailable.";
+			cameraStatus.textContent = "Passthrough AR works, but hand tracking failed to initialize. See the error message.";
 		}
 		setStatus(useWebXR ? "Native WebXR hit-test ready" : "Passthrough walk-around ready");
 		updateARButtons();
@@ -591,7 +594,7 @@ launchNativeWalkButton.addEventListener("click", () => void launchNativeWalkArou
 walkViewButton.addEventListener("click", () => spatialTracker.setMode(WALK_VIEW_MODE));
 walkSculptButton.addEventListener("click", () => {
 	if (!cameraManager.stream || !handTracker.landmarker) {
-		cameraStatus.textContent = "Walk Sculpt needs direct rear-camera access for MediaPipe. Use rear-camera passthrough mode.";
+		cameraStatus.textContent = "Walk Sculpt needs the direct rear-camera feed and initialized MediaPipe. Exit Native XR and use Passthrough AR + Hands if unavailable.";
 		return;
 	}
 	spatialTracker.setMode(WALK_SCULPT_MODE);
@@ -602,7 +605,7 @@ function placeModel() {
 	if (!arActive) return;
 	if (!spatialTracker.anchorHere()) return;
 	worldAnchorGroup.visible = true;
-	cameraStatus.textContent = "Object anchored. Choose Walk View to inspect or Walk Sculpt to sculpt.";
+	cameraStatus.textContent = "Placed in Walk View (inspection only). Tap Walk Sculpt to show the hand skeleton and enable sculpting. Native XR may reserve the camera; use Passthrough AR + Hands for hand sculpting.";
 	canvasHelp.classList.add("is-hidden");
 	setStatus("Object anchored in world space");
 }
