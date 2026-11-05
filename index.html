@@ -8,7 +8,7 @@
 		<title>Clay Studio — Camera AR Sculpting</title>
 	</head>
 	<body>
-		<div class="app-shell">
+		<div class="app-shell" id="ui-overlay">
 			<aside class="sidebar">
 				<a class="brand" href="#" aria-label="Clay Studio home">
 					<span class="brand-mark" aria-hidden="true">C</span>
@@ -42,25 +42,32 @@
 							<kbd>2</kbd>
 						</button>
 					</div>
+					<button class="sculpt-toggle" id="sculpt-toggle" type="button" aria-pressed="true">Sculpt Mode <span>ON</span></button>
 
 					<div class="section-heading settings-heading"><span class="eyebrow">BRUSH SETTINGS</span></div>
 					<label class="slider-label" for="brush-size">
 						<span>Radius</span><output id="radius-value" for="brush-size">0.22</output>
 					</label>
-					<input id="brush-size" class="range" type="range" min="0.08" max="0.55" step="0.01" value="0.22">
+					<input id="brush-size" class="range" type="range" min="0.015" max="0.12" step="0.005" value="0.035">
 					<div class="range-ends"><span>Fine</span><span>Broad</span></div>
 
 					<label class="slider-label strength-label" for="brush-strength">
 						<span>Strength</span><output id="strength-value" for="brush-strength">0.045</output>
 					</label>
-					<input id="brush-strength" class="range" type="range" min="0.01" max="0.12" step="0.005" value="0.045">
+					<input id="brush-strength" class="range" type="range" min="0.003" max="0.04" step="0.001" value="0.012">
 					<div class="range-ends"><span>Gentle</span><span>Bold</span></div>
+					<label class="slider-label strength-label" for="depth-calibration">
+						<span>Hand depth calibration</span><output id="depth-value" for="depth-calibration">1.00×</output>
+					</label>
+					<input id="depth-calibration" class="range" type="range" min="0.5" max="2" step="0.01" value="1">
+					<div class="range-ends"><span>Closer</span><span>Farther</span></div>
 
 					<div class="sidebar-divider"></div>
 					<div class="section-heading"><span class="eyebrow">SCULPT</span></div>
 					<div class="action-list">
 						<button class="action-button" id="reset-button"><span aria-hidden="true">⟲</span>Reset shape</button>
 						<button class="action-button" id="import-button"><span aria-hidden="true">＋</span>Import model <kbd>⌘O</kbd></button>
+						<button class="action-button" id="export-button"><span aria-hidden="true">⇩</span>Export STL</button>
 						<input id="model-file" type="file" accept=".stl,.obj,.3mf" hidden>
 					</div>
 				</div>
@@ -76,14 +83,29 @@
 					<div class="breadcrumb"><span>Workspace</span><span class="crumb-slash">/</span><strong>Untitled form</strong></div>
 					<div class="topbar-actions">
 						<span class="connection-status"><span class="status-dot"></span><span id="status-message">Ready to sculpt</span></span>
-						<button class="camera-hands-button" id="ar-button" type="button">Place in AR</button>
+						<button class="camera-hands-button" id="ar-button" type="button">Walk-Around AR</button>
+						<button class="camera-hands-button webxr-button" id="webxr-button" type="button">Launch Native WebXR Walk-Around</button>
 					</div>
 				</header>
 				<section class="viewport" aria-label="3D sculpting canvas">
 					<video class="hand-camera-feed" id="hand-camera-feed" aria-hidden="true" autoplay muted playsinline></video>
-					<canvas class="hand-camera-landmarks" id="hand-camera-landmarks" aria-hidden="true"></canvas>
 					<div class="camera-hand-status" id="camera-hand-status" role="status" hidden></div>
-					<button class="camera-place-button" id="camera-place-button" type="button" hidden>Place clay</button>
+					<button class="camera-place-button" id="camera-place-button" type="button" hidden>Anchor Object in Space</button>
+					<div class="ar-toolbar" id="ar-toolbar" hidden aria-label="AR sculpt controls">
+						<div class="ar-walk-modes" role="group" aria-label="AR walk mode">
+							<button id="walk-view-button" type="button" aria-pressed="false">Walk View</button>
+							<button id="walk-sculpt-button" type="button" aria-pressed="false">Walk Sculpt</button>
+						</div>
+						<button id="recenter-anchor-button" type="button" hidden>Re-Center Anchor Here</button>
+						<button id="launch-native-walk-button" type="button">Launch Native WebXR Walk-Around</button>
+						<button class="ar-sculpt-toggle" id="ar-sculpt-toggle" type="button" aria-pressed="true">Sculpt ON</button>
+						<button class="ar-mode-button" id="ar-mode-button" type="button">Tool: Raise</button>
+						<label>Radius <input id="ar-brush-size" type="range" min="0.015" max="0.12" step="0.005" value="0.035"></label>
+						<label>Strength <input id="ar-brush-strength" type="range" min="0.003" max="0.04" step="0.001" value="0.012"></label>
+						<label>Depth <input id="ar-depth-calibration" type="range" min="0.5" max="2" step="0.01" value="1"></label>
+						<button class="ar-import-button" id="ar-import-button" type="button">Import model</button>
+						<button class="ar-export-button" id="ar-export-button" type="button">Export STL</button>
+					</div>
 					<div class="viewport-glow" aria-hidden="true"></div>
 					<div class="viewport-caption"><span class="caption-dot"></span><span id="model-label">CLAY FORM</span></div>
 					<div class="canvas-help" id="canvas-help">
