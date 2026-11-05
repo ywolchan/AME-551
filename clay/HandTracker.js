@@ -226,8 +226,9 @@ export class HandTracker {
 		});
 	}
 
-	// Desktop webcam: the hand is placed at the clay's depth from its 2D wrist position and
-	// palm size; its shape comes from MediaPipe's metric worldLandmarks, mirrored like a selfie view.
+	// Desktop webcam: the scene camera acts as the user's eye. The webcam frame is rotated 180° about
+	// the vertical axis (a proper rotation, so a right hand stays a right-hand glove), and reaching
+	// toward the screen pushes the hand deeper into the scene.
 	_reconstructDesktop(landmarks, worldLandmarks, camera, smoother, time) {
 		const width = this.video.videoWidth;
 		const height = this.video.videoHeight;
@@ -238,7 +239,7 @@ export class HandTracker {
 		const handDistance = smoother.distance.filter(THREE.MathUtils.clamp(rawDistance, 0.15, 1.2), time);
 		smoother.lastDistance = handDistance;
 		const depth = THREE.MathUtils.clamp(
-			this.focusDistance + (handDistance - DESKTOP_REFERENCE_DISTANCE) * this.depthCalibration,
+			this.focusDistance - (handDistance - DESKTOP_REFERENCE_DISTANCE) * this.depthCalibration,
 			0.25,
 			this.focusDistance * 2,
 		);
@@ -255,7 +256,7 @@ export class HandTracker {
 		);
 		const root = worldLandmarks[0];
 		return worldLandmarks.map((landmark) => this._point
-			.set(-(landmark.x - root.x), -(landmark.y - root.y), -(landmark.z - root.z))
+			.set(-(landmark.x - root.x), -(landmark.y - root.y), landmark.z - root.z)
 			.applyQuaternion(this._cameraQuaternion)
 			.add(wristWorld)
 			.clone());
